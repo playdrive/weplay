@@ -1,0 +1,1805 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WePlay</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%238ff5ee'/%3E%3Cstop offset='1' stop-color='%232a8f9e'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='512' height='512' rx='104' fill='%230b0c10'/%3E%3Cpath d='M188 138 L188 374 L378 256 Z' fill='url(%23g)'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.5.15/hls.min.js"></script>
+<style>
+  :root{
+    --bg:#0b0c10;
+    --panel:#15171c;
+    --panel-2:#1c1f26;
+    --line: rgba(237,237,237,0.08);
+    --text:#ededed;
+    --muted:#8b90a0;
+    --cyan:#4cdbd0;
+    --red:#e8483b;
+    --amber:#ffb020;
+    --font-display:'Sarabun', sans-serif;
+    --font-body:'Sarabun', sans-serif;
+    --font-mono:'Sarabun', sans-serif;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  html,body{height:100%;}
+  body{
+    background:
+      radial-gradient(1200px 600px at 80% -10%, rgba(76,219,208,0.06), transparent 60%),
+      var(--bg);
+    color:var(--text);
+    font-family:var(--font-body);
+    height:100vh;
+    overflow:hidden;
+    display:flex;
+    flex-direction:column;
+  }
+  /* subtle scanline texture */
+  body::before{
+    content:"";
+    position:fixed; inset:0;
+    background:repeating-linear-gradient(180deg, rgba(255,255,255,0.015) 0px, rgba(255,255,255,0.015) 1px, transparent 1px, transparent 3px);
+    pointer-events:none;
+    z-index:1000;
+  }
+
+  header{
+    padding:20px 28px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    border-bottom:1px solid var(--line);
+    background:linear-gradient(180deg, rgba(255,255,255,0.02), transparent);
+  }
+  .brand{
+    display:flex; align-items:center; gap:12px;
+  }
+  .tally{
+    width:10px; height:10px; border-radius:50%;
+    background:var(--muted);
+    box-shadow:0 0 0 3px rgba(255,255,255,0.03);
+    transition:all .3s ease;
+  }
+  .logo-badge{
+    width:34px; height:34px;
+    border-radius:9px;
+    background:linear-gradient(135deg, rgba(76,219,208,0.18), rgba(76,219,208,0.02));
+    border:1px solid rgba(76,219,208,0.35);
+    display:flex; align-items:center; justify-content:center;
+    flex-shrink:0;
+  }
+  .tally.live{
+    background:var(--red);
+    box-shadow:0 0 14px 2px rgba(232,72,59,0.7), 0 0 0 3px rgba(232,72,59,0.12);
+    animation:pulse 1.6s ease-in-out infinite;
+  }
+  @keyframes pulse{
+    0%,100%{opacity:1;}
+    50%{opacity:0.45;}
+  }
+  h1{
+    font-family:var(--font-display);
+    font-size:28px;
+    letter-spacing:0.01em;
+    font-weight:800;
+    background:linear-gradient(90deg, #eafffd 0%, #4cdbd0 55%, #2a8f9e 100%);
+    -webkit-background-clip:text;
+    background-clip:text;
+    color:transparent;
+  }
+  .sub{
+    font-family:var(--font-mono);
+    font-size:14px;
+    color:var(--muted);
+    letter-spacing:0.05em;
+    margin-top:2px;
+  }
+  .cast-status{
+    font-family:var(--font-mono);
+    font-size:15px;
+    color:var(--muted);
+    text-align:right;
+    letter-spacing:0.03em;
+  }
+
+  main{
+    flex:1;
+    display:grid;
+    grid-template-columns:1fr 460px;
+    gap:1px;
+    background:var(--line);
+    overflow:hidden;
+  }
+  @media (max-width:900px){
+    main{
+      grid-template-columns:1fr;
+      grid-template-rows:auto 1fr;
+    }
+  }
+
+  .stage{
+    background:var(--bg);
+    display:flex;
+    flex-direction:column;
+    min-height:0;
+    min-width:0;
+  }
+  .player-frame{
+    display:flex;
+    flex-direction:column;
+    min-height:0;
+    flex:1;
+  }
+  .player-frame:fullscreen{
+    width:100vw; height:100vh;
+    background:#000;
+  }
+  .player-frame:fullscreen .video-wrap{
+    border-bottom:none;
+  }
+  .video-wrap{
+    position:relative;
+    background:#000;
+    flex:1;
+    min-height:0;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    border-bottom:1px solid var(--line);
+  }
+  .pv{
+    position:absolute;
+    inset:0;
+    width:100%; height:100%;
+    background:#000;
+    object-fit:contain;
+    opacity:0;
+    pointer-events:none;
+    transition:opacity .25s ease;
+    z-index:1;
+  }
+  .pv.front{
+    opacity:1;
+    pointer-events:auto;
+    z-index:2;
+  }
+  .fs-hint{
+    position:absolute;
+    top:12px; right:14px;
+    font-family:var(--font-mono);
+    font-size:14px;
+    color:var(--muted);
+    background:rgba(0,0,0,0.55);
+    padding:4px 9px;
+    border-radius:3px;
+    letter-spacing:0.06em;
+    opacity:0;
+    transition:opacity .2s ease;
+    pointer-events:none;
+    z-index:5;
+  }
+  .video-wrap:hover .fs-hint{opacity:1;}
+  .video-wrap:fullscreen .fs-hint{display:none;}
+  .video-empty{
+    position:absolute; inset:0;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:10px;
+    color:var(--muted);
+    font-family:var(--font-mono);
+    font-size:15px;
+    letter-spacing:0.08em;
+    text-transform:uppercase;
+    pointer-events:none;
+    z-index:5;
+  }
+  .video-empty svg{opacity:0.35;}
+
+  .timecode{
+    position:absolute;
+    bottom:12px; left:14px;
+    font-family:var(--font-mono);
+    font-variant-numeric:tabular-nums;
+    font-size:16px;
+    color:var(--cyan);
+    background:rgba(0,0,0,0.55);
+    padding:4px 9px;
+    border-radius:3px;
+    letter-spacing:0.06em;
+    border:1px solid rgba(76,219,208,0.2);
+    z-index:5;
+  }
+  .preload-badge{
+    position:absolute;
+    bottom:12px; right:14px;
+    font-family:var(--font-mono);
+    font-size:14px;
+    color:var(--amber);
+    background:rgba(0,0,0,0.55);
+    padding:4px 9px;
+    border-radius:3px;
+    letter-spacing:0.1em;
+    border:1px solid rgba(255,176,32,0.3);
+    z-index:5;
+    opacity:0;
+    transition:opacity .2s ease;
+  }
+  .preload-badge.show{opacity:1;}
+  .now-badge{
+    position:absolute;
+    top:12px; left:14px;
+    font-family:var(--font-mono);
+    font-size:14px;
+    color:var(--red);
+    background:rgba(0,0,0,0.55);
+    padding:4px 9px;
+    border-radius:3px;
+    letter-spacing:0.12em;
+    border:1px solid rgba(232,72,59,0.3);
+    display:none;
+    align-items:center;
+    gap:6px;
+    z-index:5;
+  }
+  .now-badge.show{display:flex;}
+  .now-badge .dot{width:6px;height:6px;border-radius:50%;background:var(--red);animation:pulse 1.6s ease-in-out infinite;}
+
+  .controls{
+    padding:16px 20px;
+    display:flex;
+    align-items:center;
+    gap:14px;
+    background:var(--panel);
+    flex-wrap:wrap;
+    flex-shrink:0;
+  }
+  .btn{
+    background:var(--panel-2);
+    border:1px solid var(--line);
+    color:var(--text);
+    width:48px; height:48px;
+    border-radius:8px;
+    display:flex; align-items:center; justify-content:center;
+    cursor:pointer;
+    transition:all .15s ease;
+    flex-shrink:0;
+  }
+  .btn:hover{border-color:var(--cyan); color:var(--cyan);}
+  .btn:active{transform:scale(0.94);}
+  .btn.wide{width:auto; padding:0 18px; gap:8px; font-family:var(--font-mono); font-size:15px; letter-spacing:0.06em; text-transform:uppercase;}
+  .btn.primary{background:var(--cyan); color:#062220; border-color:var(--cyan);}
+  .btn.primary:hover{background:#66e6dc; color:#062220;}
+  .btn[disabled]{opacity:0.35; cursor:not-allowed;}
+  .btn[disabled]:hover{border-color:var(--line); color:var(--text);}
+
+  .seek{
+    flex:1;
+    min-width:120px;
+    display:flex;
+    align-items:center;
+    gap:10px;
+  }
+  input[type=range]{
+    -webkit-appearance:none;
+    width:100%;
+    height:3px;
+    background:var(--line);
+    border-radius:2px;
+    outline:none;
+  }
+  input[type=range]::-webkit-slider-thumb{
+    -webkit-appearance:none;
+    width:12px;height:12px;border-radius:50%;
+    background:var(--cyan);
+    cursor:pointer;
+    box-shadow:0 0 8px rgba(76,219,208,0.6);
+  }
+  input.vol{width:90px;}
+
+  .meta-row{
+    padding:14px 20px 18px;
+    border-top:1px solid var(--line);
+    flex-shrink:0;
+  }
+  .meta-title{
+    font-family:var(--font-display);
+    font-size:19px;
+    font-weight:600;
+    margin-bottom:4px;
+  }
+  .meta-url{
+    font-family:var(--font-mono);
+    font-size:14px;
+    color:var(--muted);
+    word-break:break-all;
+  }
+
+  /* Playlist panel */
+  .panel{
+    background:var(--bg);
+    display:flex;
+    flex-direction:column;
+    min-height:0;
+    min-width:0;
+  }
+  .panel-head{
+    padding:18px 20px 14px;
+    border-bottom:1px solid var(--line);
+  }
+  .panel-head h2{
+    font-family:var(--font-display);
+    font-size:15px;
+    letter-spacing:0.14em;
+    text-transform:uppercase;
+    color:var(--muted);
+    margin-bottom:12px;
+  }
+  .save-load-row{
+    display:flex;
+    gap:8px;
+    margin-bottom:12px;
+  }
+  .save-load-row .btn{
+    flex:1;
+    justify-content:center;
+  }
+  .save-load-row .btn svg{ flex-shrink:0; }
+  form.add-form{
+    display:flex;
+    flex-direction:column;
+    gap:8px;
+  }
+  .add-form .row{display:flex; gap:8px;}
+  input[type=text], input[type=url]{
+    flex:1;
+    background:var(--panel-2);
+    border:1px solid var(--line);
+    color:var(--text);
+    padding:12px 14px;
+    border-radius:5px;
+    font-family:var(--font-body);
+    font-size:16px;
+    outline:none;
+    transition:border-color .15s ease;
+    min-width:0;
+  }
+  input[type=text]:focus, input[type=url]:focus{border-color:var(--cyan);}
+  input::placeholder{color:#565b68;}
+
+  .playlist{
+    flex:1;
+    overflow-y:auto;
+    padding:6px 0 20px;
+  }
+  .playlist::-webkit-scrollbar{width:6px;}
+  .playlist::-webkit-scrollbar-thumb{background:var(--line); border-radius:3px;}
+
+  .track{
+    display:flex;
+    align-items:center;
+    gap:12px;
+    padding:14px 20px;
+    border-bottom:1px solid var(--line);
+    cursor:pointer;
+    position:relative;
+    transition:background .15s ease;
+  }
+  .track:hover{background:rgba(255,255,255,0.02);}
+  .track.active{background:rgba(76,219,208,0.06);}
+  .track.active .idx{color:var(--cyan);}
+  .idx{
+    font-family:var(--font-mono);
+    font-size:15px;
+    color:var(--muted);
+    width:32px;
+    flex-shrink:0;
+    text-align:center;
+  }
+  .track-info{flex:1; min-width:0;}
+  .track-title{
+    font-size:17px;
+    font-weight:500;
+    line-height:1.4;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+  }
+  .ready-tag{
+    font-family:var(--font-mono);
+    font-size:14px;
+    color:var(--amber);
+    border:1px solid rgba(255,176,32,0.35);
+    border-radius:3px;
+    padding:1px 5px;
+    margin-left:8px;
+    letter-spacing:0.06em;
+    vertical-align:middle;
+  }
+  .status-tag{
+    font-family:var(--font-mono);
+    font-size:14px;
+    border-radius:3px;
+    padding:1px 5px;
+    margin-left:8px;
+    letter-spacing:0.06em;
+    vertical-align:middle;
+    border:1px solid transparent;
+  }
+  .status-tag.checking{
+    color:var(--muted);
+    border-color:rgba(139,144,160,0.35);
+    animation:pulse 1.6s ease-in-out infinite;
+  }
+  .status-tag.ok{
+    color:var(--cyan);
+    border-color:rgba(76,219,208,0.35);
+  }
+  .status-tag.dead{
+    color:var(--red);
+    border-color:rgba(232,72,59,0.4);
+  }
+  .status-tag.unknown{
+    color:var(--muted);
+    border-color:rgba(139,144,160,0.3);
+  }
+  .track.status-dead .track-title{
+    text-decoration:line-through;
+    opacity:0.6;
+  }
+  .track-url{
+    font-family:var(--font-mono);
+    font-size:14px;
+    color:var(--muted);
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    margin-top:2px;
+  }
+  .track-tally{
+    width:7px; height:7px; border-radius:50%;
+    background:transparent;
+    flex-shrink:0;
+  }
+  .track.active .track-tally{
+    background:var(--red);
+    box-shadow:0 0 8px 1px rgba(232,72,59,0.7);
+    animation:pulse 1.6s ease-in-out infinite;
+  }
+  .track-actions{
+    display:flex; flex-direction:column; gap:3px; flex-shrink:0;
+  }
+  .mini-btn{
+    width:24px; height:20px;
+    background:transparent;
+    border:1px solid var(--line);
+    border-radius:5px;
+    color:var(--muted);
+    display:flex; align-items:center; justify-content:center;
+    cursor:pointer;
+    transition:color .15s ease, border-color .15s ease;
+  }
+  .mini-btn:hover{color:var(--cyan); border-color:var(--cyan);}
+  .mini-btn.del:hover{color:var(--red); border-color:var(--red);}
+
+  /* Drag-to-reorder */
+  .drag-handle{
+    width:20px; flex-shrink:0;
+    display:flex; align-items:center; justify-content:center;
+    color:var(--muted);
+    cursor:grab;
+    opacity:0.5;
+    transition:opacity .15s ease, color .15s ease;
+  }
+  .track:hover .drag-handle{ opacity:1; }
+  .drag-handle:hover{ color:var(--cyan); }
+  .drag-handle:active{ cursor:grabbing; }
+  .track.dragging{ opacity:0.4; }
+  .track.drop-before{ box-shadow:inset 0 2px 0 0 var(--cyan); }
+  .track.drop-after{ box-shadow:inset 0 -2px 0 0 var(--cyan); }
+
+  .empty-state{
+    padding:40px 20px;
+    text-align:center;
+    color:var(--muted);
+    font-family:var(--font-mono);
+    font-size:15px;
+    letter-spacing:0.04em;
+    line-height:1.7;
+  }
+
+  .footer-note{
+    padding:12px 20px;
+    border-top:1px solid var(--line);
+    font-family:var(--font-mono);
+    font-size:14px;
+    color:#565b68;
+    line-height:1.6;
+  }
+
+  .toast-stack{
+    position:fixed;
+    left:50%;
+    bottom:28px;
+    transform:translateX(-50%);
+    z-index:2000;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    gap:8px;
+    pointer-events:none;
+  }
+  .toast{
+    background:var(--panel-2);
+    border:1px solid var(--line);
+    border-left:3px solid var(--cyan);
+    color:var(--text);
+    font-family:var(--font-body);
+    font-size:16px;
+    padding:11px 16px;
+    border-radius:6px;
+    box-shadow:0 8px 24px rgba(0,0,0,0.4);
+    max-width:min(90vw, 460px);
+    opacity:0;
+    transform:translateY(8px);
+    transition:opacity .2s ease, transform .2s ease;
+  }
+  .toast.show{ opacity:1; transform:translateY(0); }
+  .toast.warn{ border-left-color:var(--amber); }
+  .toast.error{ border-left-color:var(--red); }
+
+  svg{display:block;}
+
+  /* Named-playlist modal */
+  .modal-overlay{
+    position:fixed; inset:0;
+    background:rgba(0,0,0,0.62);
+    display:none;
+    align-items:center; justify-content:center;
+    z-index:3000;
+    padding:20px;
+  }
+  .modal-overlay.show{display:flex;}
+  .modal{
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:12px;
+    width:min(94vw, 460px);
+    max-height:82vh;
+    display:flex; flex-direction:column;
+    overflow:hidden;
+    box-shadow:0 24px 70px rgba(0,0,0,0.55);
+  }
+  .modal-head{
+    padding:18px 20px;
+    border-bottom:1px solid var(--line);
+    display:flex; align-items:center; justify-content:space-between; gap:12px;
+  }
+  .modal-head h3{ font-size:19px; font-weight:600; }
+  .modal-close{
+    width:32px; height:32px; flex-shrink:0;
+    background:transparent; border:1px solid var(--line); border-radius:6px;
+    color:var(--muted); cursor:pointer;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .modal-close:hover{ color:var(--text); border-color:var(--muted); }
+  .modal-body{ padding:18px 20px; overflow-y:auto; }
+  .modal-body .field-label{
+    font-size:15px; color:var(--muted); margin-bottom:8px; display:block;
+  }
+  .modal-body input[type=text]{ width:100%; display:block; }
+  .modal-foot{
+    padding:14px 20px;
+    border-top:1px solid var(--line);
+    display:flex; gap:10px; justify-content:flex-end;
+  }
+  .modal-foot .btn.wide{ width:auto; }
+  .saved-list{ display:flex; flex-direction:column; gap:8px; }
+  .saved-row{
+    display:flex; align-items:center; gap:12px;
+    padding:12px 14px;
+    border:1px solid var(--line); border-radius:8px;
+    background:var(--panel-2);
+    cursor:pointer;
+    transition:border-color .15s ease, background .15s ease;
+  }
+  .saved-row:hover{ border-color:var(--cyan); background:rgba(76,219,208,0.05); }
+  .saved-row .info{ flex:1; min-width:0; }
+  .saved-row .name{
+    font-size:16px; font-weight:500;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  .saved-row .sub{
+    font-family:var(--font-mono); font-size:13px; color:var(--muted); margin-top:2px;
+  }
+  .saved-row .del{
+    width:34px; height:34px; flex-shrink:0;
+    background:transparent; border:1px solid var(--line); border-radius:6px;
+    color:var(--muted); cursor:pointer;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .saved-row .del:hover{ color:var(--red); border-color:var(--red); }
+  .modal-empty{
+    text-align:center; color:var(--muted);
+    font-size:15px; line-height:1.7; padding:24px 8px;
+  }
+  .modal.small{ width:min(92vw, 400px); }
+  .confirm-overlay{ z-index:3100; }   /* stacks above the save/load modal */
+  .modal-msg{ font-size:16px; line-height:1.65; color:var(--text); }
+  .modal-msg strong{ color:var(--cyan); font-weight:600; }
+  .btn.wide.danger{ background:var(--red); border-color:var(--red); color:#fff; }
+  .btn.wide.danger:hover{ background:#f05a4e; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <div class="tally" id="tally"></div>
+    <div class="logo-badge">
+      <svg width="18" height="18" viewBox="0 0 24 24">
+        <defs>
+          <linearGradient id="logoGrad" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#8ff5ee"/>
+            <stop offset="1" stop-color="#2a8f9e"/>
+          </linearGradient>
+        </defs>
+        <path d="M8 5v14l11-7z" fill="url(#logoGrad)"/>
+      </svg>
+    </div>
+    <div>
+      <h1>WePlay</h1>
+      <div class="sub">HLS PLAYER · CONTINUOUS PLAYLIST · CAST</div>
+    </div>
+  </div>
+  <div class="cast-status" id="castStatus">CAST: กำลังตรวจสอบ…</div>
+</header>
+
+<main>
+  <section class="stage">
+    <div class="player-frame" id="playerFrame">
+      <div class="video-wrap" id="videoWrap">
+        <video id="videoA" class="pv front" playsinline></video>
+        <video id="videoB" class="pv" playsinline muted></video>
+        <div class="video-empty" id="videoEmpty">
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4">
+            <rect x="2" y="4" width="20" height="14" rx="2"/><path d="M2 8h20"/><circle cx="6" cy="6" r="0.6" fill="currentColor"/>
+          </svg>
+          <div>ยังไม่มีสตรีมที่กำลังเล่น</div>
+          <div style="font-size:14px; opacity:0.7;">เพิ่มลิงก์ .m3u8 จากแผงด้านขวา</div>
+        </div>
+        <div class="now-badge" id="nowBadge"><span class="dot"></span>ON AIR</div>
+        <div class="timecode" id="timecode">00:00 / 00:00</div>
+        <div class="preload-badge" id="preloadBadge">รายการถัดไปพร้อมแล้ว</div>
+        <div class="fs-hint" id="fsHint">ดับเบิลคลิกเพื่อขยายเต็มจอ</div>
+      </div>
+
+      <div class="controls">
+        <button class="btn primary" id="playBtn" title="เล่น/หยุด">
+          <svg id="playIcon" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+        </button>
+        <button class="btn" id="prevBtn" title="ก่อนหน้า">
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>
+        </button>
+        <button class="btn" id="nextBtn" title="ถัดไป">
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="currentColor"><path d="M16 6h2v12h-2zM6 6l8.5 6L6 18z"/></svg>
+        </button>
+
+        <div class="seek">
+          <input type="range" id="seekBar" min="0" max="100" value="0" step="0.1">
+        </div>
+
+        <svg width="19" height="19" viewBox="0 0 24 24" fill="currentColor" style="color:var(--muted); flex-shrink:0;"><path d="M5 9v6h4l5 5V4L9 9H5z"/></svg>
+        <input type="range" class="vol" id="volBar" min="0" max="1" value="1" step="0.01">
+
+        <button class="btn wide" id="castBtn" title="แคสต์ไปยังทีวี" disabled>
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 20h.01M2 16.5a5 5 0 0 1 5 5M2 12a9 9 0 0 1 9 9M14 4h6a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-6"/></svg>
+          CAST
+        </button>
+
+        <button class="btn" id="fsBtn" title="เต็มจอ">
+          <svg id="fsIcon" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M8 21H5a2 2 0 0 1-2-2v-3"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <div class="meta-row">
+      <div class="meta-title" id="metaTitle">ไม่มีรายการที่เลือก</div>
+      <div class="meta-url" id="metaUrl">—</div>
+    </div>
+  </section>
+
+  <aside class="panel">
+    <div class="panel-head">
+      <h2>เพิ่มสตรีมลงเพลย์ลิสต์</h2>
+      <div class="save-load-row">
+        <button type="button" class="btn wide" id="savePlaylistBtn" title="บันทึกเพลย์ลิสต์นี้ไว้ในเครื่อง">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg>
+          บันทึก
+        </button>
+        <button type="button" class="btn wide" id="loadPlaylistBtn" title="โหลดเพลย์ลิสต์ที่บันทึกไว้">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+          โหลด
+        </button>
+      </div>
+      <div class="save-load-row">
+        <button type="button" class="btn wide" id="checkLinksBtn" title="ตรวจสอบว่าลิงก์ทุกรายการยังใช้งานได้อยู่ไหม" style="width:100%;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 12l2 2 4-4M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z"/></svg>
+          ตรวจสอบลิงก์ทั้งหมด
+        </button>
+      </div>
+      <form class="add-form" id="addForm">
+        <input type="url" id="urlInput" placeholder="วางลิงก์ .m3u8 ที่นี่" required>
+        <div class="row">
+          <input type="text" id="titleInput" placeholder="ชื่อรายการ (ไม่บังคับ)">
+          <button type="submit" class="btn wide primary" style="width:auto;">เพิ่ม</button>
+        </div>
+      </form>
+    </div>
+    <div class="playlist" id="playlist">
+      <div class="empty-state" id="emptyState">
+        เพลย์ลิสต์ว่างเปล่า<br>เพิ่มลิงก์ M3U8 ด้านบนเพื่อเริ่มต้น
+      </div>
+    </div>
+    <div class="footer-note">
+      รองรับ CORS ของสตรีมต้นทางเอง<br>
+      เมื่อจบคลิปจะเล่นรายการถัดไปอัตโนมัติ<br>
+      สถานะลิงก์: <span style="color:var(--cyan)">ใช้งานได้</span> ·
+      <span style="color:var(--red)">ใช้งานไม่ได้</span> ·
+      <span style="color:var(--muted)">ไม่ทราบผล (อาจติด CORS)</span>
+    </div>
+  </aside>
+</main>
+
+<div class="modal-overlay" id="modal">
+  <div class="modal" id="modalCard" role="dialog" aria-modal="true"></div>
+</div>
+
+<div class="modal-overlay confirm-overlay" id="confirmModal">
+  <div class="modal small" id="confirmCard" role="alertdialog" aria-modal="true"></div>
+</div>
+
+<div class="toast-stack" id="toastStack"></div>
+
+<script>
+(function(){
+  const videoEmpty = document.getElementById('videoEmpty');
+  const nowBadge = document.getElementById('nowBadge');
+  const preloadBadge = document.getElementById('preloadBadge');
+  const tally = document.getElementById('tally');
+  const timecode = document.getElementById('timecode');
+  const playBtn = document.getElementById('playBtn');
+  const playIcon = document.getElementById('playIcon');
+  const prevBtn = document.getElementById('prevBtn');
+  const nextBtn = document.getElementById('nextBtn');
+  const seekBar = document.getElementById('seekBar');
+  const volBar = document.getElementById('volBar');
+  const castBtn = document.getElementById('castBtn');
+  const castStatus = document.getElementById('castStatus');
+  const addForm = document.getElementById('addForm');
+  const urlInput = document.getElementById('urlInput');
+  const titleInput = document.getElementById('titleInput');
+  const savePlaylistBtn = document.getElementById('savePlaylistBtn');
+  const loadPlaylistBtn = document.getElementById('loadPlaylistBtn');
+  const checkLinksBtn = document.getElementById('checkLinksBtn');
+  const PLAYLIST_STORAGE_KEY = 'console-m3u8-playlist-v1';   // last working set (auto-restore)
+  const NAMED_STORAGE_KEY = 'console-m3u8-playlists-v1';     // { name: { items:[{url,title}], savedAt } }
+
+  const STATUS_TAG_HTML = {
+    checking: '<span class="status-tag checking">กำลังตรวจสอบ…</span>',
+    ok:       '<span class="status-tag ok">ใช้งานได้</span>',
+    dead:     '<span class="status-tag dead">ใช้งานไม่ได้</span>',
+    unknown:  '<span class="status-tag unknown">ไม่ทราบผล</span>',
+  };
+
+  const toastStack = document.getElementById('toastStack');
+  function showToast(message, kind, ms){
+    const el = document.createElement('div');
+    el.className = 'toast' + (kind ? ' ' + kind : '');
+    el.textContent = message;
+    toastStack.appendChild(el);
+    requestAnimationFrame(()=> el.classList.add('show'));
+    setTimeout(()=>{
+      el.classList.remove('show');
+      setTimeout(()=> el.remove(), 250);
+    }, ms || 4000);
+  }
+  const playlistEl = document.getElementById('playlist');
+  const emptyState = document.getElementById('emptyState');
+  const metaTitle = document.getElementById('metaTitle');
+  const metaUrl = document.getElementById('metaUrl');
+
+  // Two overlapping <video> elements let us buffer the next track in the
+  // background one, then swap instantly when the front one ends — no
+  // reload, no black-screen gap.
+  const players = [
+    { el: document.getElementById('videoA'), hls: null, forIndex: -1 },
+    { el: document.getElementById('videoB'), hls: null, forIndex: -1 },
+  ];
+  const PRELOAD_SECONDS_BEFORE_END = 15; // start buffering next track when this close to the end
+
+  let playlist = [];
+  let currentIndex = -1;
+  let activeSlot = 0;
+  let autoSkipAttempts = 0; // safety guard: stop auto-skipping once we've cycled the whole playlist
+  let castSession = null;
+  let castAvailable = false;
+  let remotePlayer = null;
+  let remotePlayerController = null;
+  let isDraggingSeek = false;
+  let isDraggingVol = false;
+  let dragFromIndex = -1; // playlist drag-to-reorder source index
+
+  function activeVideo(){ return players[activeSlot].el; }
+  function inactiveSlot(){ return activeSlot === 0 ? 1 : 0; }
+
+  const ICON_PLAY = '<path d="M8 5v14l11-7z"/>';
+  const ICON_PAUSE = '<path d="M6 5h4v14H6zM14 5h4v14h-4z"/>';
+
+  function fmtTime(sec){
+    if (!isFinite(sec) || sec < 0) sec = 0;
+    const m = Math.floor(sec/60).toString().padStart(2,'0');
+    const s = Math.floor(sec%60).toString().padStart(2,'0');
+    return m+':'+s;
+  }
+
+  function renderPlaylist(){
+    playlistEl.querySelectorAll('.track').forEach(n=>n.remove());
+    emptyState.style.display = playlist.length ? 'none' : 'block';
+    const preloadedIdx = players[inactiveSlot()].forIndex;
+    playlist.forEach((item, i)=>{
+      const t = document.createElement('div');
+      t.className = 'track' + (i === currentIndex ? ' active' : '') + (item.status === 'dead' ? ' status-dead' : '');
+      t.setAttribute('draggable', 'true');
+      const readyTag = (i === preloadedIdx && i !== currentIndex) ? '<span class="ready-tag">BUFFERED</span>' : '';
+      const statusTag = STATUS_TAG_HTML[item.status] || '';
+      t.innerHTML = `
+        <span class="drag-handle" title="ลากเพื่อจัดลำดับ">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg>
+        </span>
+        <span class="idx">${(i+1).toString().padStart(2,'0')}</span>
+        <span class="track-tally"></span>
+        <div class="track-info">
+          <div class="track-title">${escapeHtml(item.title)}${readyTag}${statusTag}</div>
+          <div class="track-url">${escapeHtml(item.url)}</div>
+        </div>
+        <div class="track-actions">
+          <button class="mini-btn" data-act="up" title="เลื่อนขึ้น">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M12 6l6 6H6z"/></svg>
+          </button>
+          <button class="mini-btn del" data-act="del" title="ลบ">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M18 6 6 18M6 6l12 12"/></svg>
+          </button>
+          <button class="mini-btn" data-act="down" title="เลื่อนลง">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M12 18l-6-6h12z"/></svg>
+          </button>
+        </div>
+      `;
+      t.addEventListener('click', (e)=>{
+        if (e.target.closest('.mini-btn')) return;
+        if (castSession) remoteQueueJump(i);
+        else goTo(i);
+      });
+      t.querySelector('[data-act="up"]').addEventListener('click', (e)=>{e.stopPropagation(); moveTrack(i,-1);});
+      t.querySelector('[data-act="down"]').addEventListener('click', (e)=>{e.stopPropagation(); moveTrack(i,1);});
+      t.querySelector('[data-act="del"]').addEventListener('click', (e)=>{e.stopPropagation(); removeTrack(i);});
+
+      // ----- drag-to-reorder -----
+      t.addEventListener('dragstart', (e)=>{
+        dragFromIndex = i;
+        t.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'move';
+        try{ e.dataTransfer.setData('text/plain', String(i)); }catch(_){}
+      });
+      t.addEventListener('dragend', ()=>{
+        dragFromIndex = -1;
+        playlistEl.querySelectorAll('.track').forEach(n=>n.classList.remove('dragging','drop-before','drop-after'));
+      });
+      t.addEventListener('dragover', (e)=>{
+        if (dragFromIndex === -1 || dragFromIndex === i) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        const r = t.getBoundingClientRect();
+        const after = e.clientY > r.top + r.height/2;
+        t.classList.toggle('drop-after', after);
+        t.classList.toggle('drop-before', !after);
+      });
+      t.addEventListener('dragleave', ()=>{ t.classList.remove('drop-before','drop-after'); });
+      t.addEventListener('drop', (e)=>{
+        e.preventDefault();
+        if (dragFromIndex === -1 || dragFromIndex === i) return;
+        const r = t.getBoundingClientRect();
+        const after = e.clientY > r.top + r.height/2;
+        // target slot in terms of the array *after* the dragged item is removed
+        let to = i + (after ? 1 : 0);
+        if (dragFromIndex < to) to--;
+        reorder(dragFromIndex, to);
+      });
+
+      playlistEl.appendChild(t);
+    });
+  }
+
+  function escapeHtml(s){
+    const d = document.createElement('div');
+    d.textContent = s == null ? '' : s;
+    // also escape quotes so the result is safe inside HTML attributes too
+    return d.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  function moveTrack(i, dir){
+    const j = i + dir;
+    if (j < 0 || j >= playlist.length) return;
+    [playlist[i], playlist[j]] = [playlist[j], playlist[i]];
+    if (currentIndex === i) currentIndex = j;
+    else if (currentIndex === j) currentIndex = i;
+    invalidatePreload(); // indices shifted — whatever was buffered may no longer be "next"
+    renderPlaylist();
+    persistLast();
+  }
+
+  // Move an item from one position to another (drag-and-drop). Keeps the
+  // currently-playing track highlighted by tracking its object identity, and
+  // invalidates the preload since "next" may have changed.
+  function reorder(from, to){
+    if (from === to || from < 0 || from >= playlist.length) return;
+    to = Math.max(0, Math.min(to, playlist.length - 1));
+    const playing = currentIndex >= 0 ? playlist[currentIndex] : null;
+    const [moved] = playlist.splice(from, 1);
+    playlist.splice(to, 0, moved);
+    currentIndex = playing ? playlist.indexOf(playing) : -1;
+    invalidatePreload();
+    renderPlaylist();
+    persistLast();
+  }
+
+  function removeTrack(i){
+    playlist.splice(i,1);
+    if (i === currentIndex){
+      stopPlayback();
+      currentIndex = -1;
+    } else if (i < currentIndex){
+      currentIndex--;
+    }
+    invalidatePreload();
+    renderPlaylist();
+    persistLast();
+  }
+
+  /* ---------- Dual-player core (preload next track, swap with no gap) ---------- */
+
+  function resetSlot(slot){
+    const p = players[slot];
+    if (p.hls){ p.hls.destroy(); p.hls = null; }
+    p.el.pause();
+    p.el.removeAttribute('src');
+    p.el.load();
+    p.forIndex = -1;
+  }
+
+  function invalidatePreload(){
+    resetSlot(inactiveSlot());
+    preloadBadge.classList.remove('show');
+  }
+
+  function updateFrontBack(){
+    players[0].el.classList.toggle('front', activeSlot === 0);
+    players[1].el.classList.toggle('front', activeSlot === 1);
+  }
+
+  // Loads a URL into a given slot. autoplay=true only for the visible/active slot;
+  // background preloads stay paused (muted) so hls.js just buffers silently.
+  function loadIntoSlot(slot, url, autoplay){
+    const p = players[slot];
+    if (p.hls){ p.hls.destroy(); p.hls = null; }
+    const el = p.el;
+    if (window.Hls && Hls.isSupported()){
+      const inst = new Hls({ enableWorker:true });
+      p.hls = inst;
+      inst.loadSource(url);
+      inst.attachMedia(el);
+      inst.on(Hls.Events.MANIFEST_PARSED, ()=>{
+        if (autoplay) el.play().catch(()=>{});
+      });
+      inst.on(Hls.Events.ERROR, (evt, data)=>{
+        if (!data.fatal) return;
+        console.error('HLS fatal error (slot ' + slot + ')', data);
+        const idx = players[slot].forIndex;
+        if (idx != null && idx >= 0 && playlist[idx]){
+          playlist[idx].status = 'dead';
+          renderPlaylist();
+        }
+        if (slot === activeSlot) handlePlaybackFailure();
+        // if it was just the background preload slot, no need to do anything —
+        // the normal fresh-load fallback in goTo()/onEnded retries when we get there
+      });
+    } else if (el.canPlayType('application/vnd.apple.mpegurl')){
+      el.src = url;
+      if (autoplay) el.play().catch(()=>{});
+    } else if (autoplay){
+      showToast('เบราว์เซอร์นี้ไม่รองรับการเล่น M3U8', 'error');
+    }
+  }
+
+  // Called when the track actually being watched fails to load. Marks it dead
+  // and skips forward automatically instead of freezing playback — but stops
+  // after cycling the whole playlist once, so a fully-dead list doesn't loop
+  // forever hammering the network.
+  function handlePlaybackFailure(){
+    autoSkipAttempts++;
+    if (autoSkipAttempts >= Math.max(playlist.length, 1)){
+      autoSkipAttempts = 0;
+      showToast('ดูเหมือนทุกรายการในเพลย์ลิสต์นี้จะเล่นไม่ได้ — ลองกด "ตรวจสอบลิงก์ทั้งหมด"', 'error', 6000);
+      return;
+    }
+    playNext();
+  }
+
+  function stopPlayback(){
+    resetSlot(0);
+    resetSlot(1);
+    activeSlot = 0;
+    updateFrontBack();
+    videoEmpty.style.display = 'flex';
+    nowBadge.classList.remove('show');
+    preloadBadge.classList.remove('show');
+    tally.classList.remove('live');
+    metaTitle.textContent = 'ไม่มีรายการที่เลือก';
+    metaUrl.textContent = '—';
+    setPlayIcon(false);
+    if ('mediaSession' in navigator){
+      navigator.mediaSession.metadata = null;
+      navigator.mediaSession.playbackState = 'none';
+    }
+  }
+
+  function finalizeSwitch(item){
+    metaTitle.textContent = item.title;
+    metaUrl.textContent = item.url;
+    videoEmpty.style.display = 'none';
+    nowBadge.classList.add('show');
+    preloadBadge.classList.remove('show');
+    tally.classList.add('live');
+    renderPlaylist();
+    updateMediaSession(item);
+  }
+
+  /* ---------- Media Session API ----------
+     Without this, the browser has no real title/artwork/controls to lay out
+     for its own native "now playing" widget (the compact media strip Chrome
+     shows in the omnibox, Android's notification, lock-screen controls,
+     Bluetooth headset buttons, etc.) — it falls back to guessing from the
+     page title with a generated letter-avatar, which is what caused the
+     title text to collide with the transport icons. Providing real metadata
+     and action handlers lets the browser render its own widget correctly. */
+  const MEDIA_ARTWORK_URI = 'data:image/svg+xml,' + encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">' +
+    '<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">' +
+    '<stop offset="0" stop-color="#8ff5ee"/><stop offset="1" stop-color="#2a8f9e"/>' +
+    '</linearGradient></defs>' +
+    '<rect width="512" height="512" rx="104" fill="#0b0c10"/>' +
+    '<path d="M188 138 L188 374 L378 256 Z" fill="url(#g)"/>' +
+    '</svg>'
+  );
+
+  function setupMediaSession(){
+    if (!('mediaSession' in navigator)) return;
+    navigator.mediaSession.setActionHandler('play', ()=>{
+      if (castSession){ if (remotePlayer && remotePlayer.isMediaLoaded) remotePlayerController.playOrPause(); }
+      else activeVideo().play().catch(()=>{});
+    });
+    navigator.mediaSession.setActionHandler('pause', ()=>{
+      if (castSession){ if (remotePlayer && remotePlayer.isMediaLoaded) remotePlayerController.playOrPause(); }
+      else activeVideo().pause();
+    });
+    navigator.mediaSession.setActionHandler('previoustrack', playPrev);
+    navigator.mediaSession.setActionHandler('nexttrack', playNext);
+    try{
+      navigator.mediaSession.setActionHandler('seekto', (details)=>{
+        if (details.seekTime == null) return;
+        if (castSession && remotePlayer && remotePlayer.duration){
+          remotePlayer.currentTime = details.seekTime;
+          remotePlayerController.seek();
+        } else {
+          const el = activeVideo();
+          if (isFinite(el.duration)) el.currentTime = details.seekTime;
+        }
+      });
+    } catch(e){ /* 'seekto' unsupported in some browsers — safe to ignore */ }
+  }
+
+  function updateMediaSession(item){
+    if (!('mediaSession' in navigator)) return;
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: item.title,
+      artist: 'WePlay',
+      album: '',
+      artwork: [
+        { src: MEDIA_ARTWORK_URI, sizes: '96x96',   type: 'image/svg+xml' },
+        { src: MEDIA_ARTWORK_URI, sizes: '192x192', type: 'image/svg+xml' },
+        { src: MEDIA_ARTWORK_URI, sizes: '512x512', type: 'image/svg+xml' },
+      ]
+    });
+    navigator.mediaSession.playbackState = 'playing';
+  }
+
+  // Central entry point for changing track — from a playlist click, prev/next
+  // buttons, or auto-advance on 'ended'. If the target track is already
+  // buffered in the background slot, this is an instant swap (no stall).
+  // Otherwise it falls back to a normal fresh load.
+  function goTo(i){
+    if (playlist.length === 0) return;
+    i = ((i % playlist.length) + playlist.length) % playlist.length;
+    const item = playlist[i];
+    const back = inactiveSlot();
+
+    if (players[back].forIndex === i && players[back].hls){
+      // instant, gapless swap — the background video is already buffered
+      const oldSlot = activeSlot;
+      activeSlot = back;
+      currentIndex = i;
+      players[activeSlot].el.muted = false;
+      players[activeSlot].el.volume = parseFloat(volBar.value);
+      updateFrontBack();
+      players[activeSlot].el.play().catch(()=>{});
+      finalizeSwitch(item);
+      resetSlot(oldSlot);
+    } else {
+      // fresh load into the current front slot
+      currentIndex = i;
+      players[activeSlot].forIndex = i;
+      players[activeSlot].el.muted = false;
+      players[activeSlot].el.volume = parseFloat(volBar.value);
+      loadIntoSlot(activeSlot, item.url, true);
+      finalizeSwitch(item);
+      resetSlot(back);
+    }
+
+    if (castSession) castLoadQueue(i);
+  }
+
+  function playNext(){
+    if (playlist.length === 0) return;
+    if (castSession){ remoteQueueNext(); return; }
+    goTo(currentIndex + 1);
+  }
+  function playPrev(){
+    if (playlist.length === 0) return;
+    if (castSession){ remoteQueuePrev(); return; }
+    goTo(currentIndex - 1);
+  }
+
+  function maybePreloadNext(el){
+    if (playlist.length < 2) return; // nothing else to preload
+    if (!isFinite(el.duration)) return;
+    const remaining = el.duration - el.currentTime;
+    if (remaining > PRELOAD_SECONDS_BEFORE_END) return;
+    const nextIdx = (currentIndex + 1) % playlist.length;
+    const back = inactiveSlot();
+    if (players[back].forIndex === nextIdx) return; // already buffering/buffered
+    players[back].forIndex = nextIdx;
+    loadIntoSlot(back, playlist[nextIdx].url, false);
+    // hls.js needs a beat to parse the manifest before we can call it "ready"
+    setTimeout(()=>{
+      if (players[back].forIndex === nextIdx){
+        preloadBadge.classList.add('show');
+        renderPlaylist();
+      }
+    }, 1200);
+  }
+
+  function setPlayIcon(isPlaying){
+    playIcon.innerHTML = isPlaying ? ICON_PAUSE : ICON_PLAY;
+  }
+
+  /* ---------- Fullscreen ---------- */
+  const playerFrame = document.getElementById('playerFrame');
+  const videoWrap = document.getElementById('videoWrap');
+  const fsBtn = document.getElementById('fsBtn');
+  const fsIcon = document.getElementById('fsIcon');
+  const ICON_EXPAND = '<path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M8 21H5a2 2 0 0 1-2-2v-3"/>';
+  const ICON_SHRINK = '<path d="M9 3v3a2 2 0 0 1-2 2H4M20 8h-3a2 2 0 0 1-2-2V3M4 16h3a2 2 0 0 1 2 2v3M15 21v-3a2 2 0 0 1 2-2h3"/>';
+
+  function isFullscreen(){
+    return !!(document.fullscreenElement || document.webkitFullscreenElement);
+  }
+
+  function requestFs(el){
+    if (el.requestFullscreen) return el.requestFullscreen();
+    if (el.webkitRequestFullscreen) return el.webkitRequestFullscreen();
+    if (activeVideo().webkitEnterFullscreen) return activeVideo().webkitEnterFullscreen(); // iOS Safari fallback (video-only)
+  }
+  function exitFs(){
+    if (document.exitFullscreen) return document.exitFullscreen();
+    if (document.webkitExitFullscreen) return document.webkitExitFullscreen();
+  }
+
+  function toggleFullscreen(){
+    if (isFullscreen()) exitFs();
+    else requestFs(playerFrame);
+  }
+
+  fsBtn.addEventListener('click', toggleFullscreen);
+  videoWrap.addEventListener('dblclick', toggleFullscreen);
+  document.addEventListener('keydown', (e)=>{
+    if (e.key === 'f' || e.key === 'F'){
+      if (document.activeElement.tagName !== 'INPUT') toggleFullscreen();
+    }
+  });
+  const fsHint = document.getElementById('fsHint');
+  ['fullscreenchange','webkitfullscreenchange'].forEach(evt=>{
+    document.addEventListener(evt, ()=>{
+      const fs = isFullscreen();
+      fsIcon.innerHTML = fs ? ICON_SHRINK : ICON_EXPAND;
+      fsHint.textContent = fs ? 'ดับเบิลคลิกเพื่อออกจากเต็มจอ' : 'ดับเบิลคลิกเพื่อขยายเต็มจอ';
+    });
+  });
+
+  players.forEach((p, slot)=>{
+    p.el.addEventListener('ended', ()=>{
+      if (slot !== activeSlot) return; // stray event from a paused background preload
+      playNext();
+    });
+    p.el.addEventListener('play', ()=>{
+      if (slot !== activeSlot) return;
+      setPlayIcon(true);
+      if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
+    });
+    p.el.addEventListener('pause', ()=>{
+      if (slot !== activeSlot) return;
+      setPlayIcon(false);
+      if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused';
+    });
+    p.el.addEventListener('playing', ()=>{
+      if (slot !== activeSlot) return;
+      autoSkipAttempts = 0; // this track is genuinely playing — reset the dead-link safety guard
+      const idx = players[slot].forIndex;
+      if (idx != null && idx >= 0 && playlist[idx] && playlist[idx].status !== 'ok'){
+        playlist[idx].status = 'ok';
+        renderPlaylist();
+      }
+    });
+    p.el.addEventListener('timeupdate', ()=>{
+      if (slot !== activeSlot) return;
+      if (!isFinite(p.el.duration)) return;
+      seekBar.value = (p.el.currentTime/p.el.duration*100) || 0;
+      timecode.textContent = fmtTime(p.el.currentTime) + ' / ' + fmtTime(p.el.duration);
+      maybePreloadNext(p.el);
+    });
+  });
+
+  playBtn.addEventListener('click', ()=>{
+    if (castSession){
+      if (!remotePlayer || !remotePlayer.isMediaLoaded){
+        if (playlist.length) castLoadQueue(currentIndex !== -1 ? currentIndex : 0);
+        return;
+      }
+      remotePlayerController.playOrPause();
+      return;
+    }
+    if (currentIndex === -1){
+      if (playlist.length) goTo(0);
+      return;
+    }
+    const el = activeVideo();
+    if (el.paused) el.play().catch(()=>{});
+    else el.pause();
+  });
+  prevBtn.addEventListener('click', playPrev);
+  nextBtn.addEventListener('click', playNext);
+
+  seekBar.addEventListener('pointerdown', ()=>{ isDraggingSeek = true; });
+  window.addEventListener('pointerup', ()=>{ isDraggingSeek = false; });
+  seekBar.addEventListener('input', ()=>{
+    if (castSession){
+      // Show an optimistic timecode while dragging; the actual seek is only
+      // sent to the TV on release (see 'change' below) to avoid spamming it.
+      if (remotePlayer && remotePlayer.duration > 0){
+        timecode.textContent = fmtTime(seekBar.value/100 * remotePlayer.duration) + ' / ' + fmtTime(remotePlayer.duration);
+      }
+      return;
+    }
+    const el = activeVideo();
+    if (isFinite(el.duration)){
+      el.currentTime = (seekBar.value/100) * el.duration;
+    }
+  });
+  seekBar.addEventListener('change', ()=>{
+    if (!castSession || !remotePlayer || !remotePlayer.duration) return;
+    remotePlayer.currentTime = (seekBar.value/100) * remotePlayer.duration;
+    remotePlayerController.seek();
+  });
+
+  volBar.addEventListener('pointerdown', ()=>{ isDraggingVol = true; });
+  window.addEventListener('pointerup', ()=>{ isDraggingVol = false; });
+  volBar.addEventListener('input', ()=>{
+    if (castSession && remotePlayer){
+      remotePlayer.volumeLevel = parseFloat(volBar.value);
+      remotePlayerController.setVolumeLevel();
+      return;
+    }
+    players.forEach(p => p.el.volume = parseFloat(volBar.value));
+  });
+
+  addForm.addEventListener('submit', (e)=>{
+    e.preventDefault();
+    const url = urlInput.value.trim();
+    if (!url) return;
+    const title = titleInput.value.trim() || ('รายการ ' + (playlist.length+1));
+    playlist.push({ url, title });
+    urlInput.value = '';
+    titleInput.value = '';
+    renderPlaylist();
+    persistLast();
+    if (currentIndex === -1) goTo(0);
+  });
+
+  function flashBtnStatus(btn, text, ms){
+    const original = btn.dataset.label || btn.innerHTML;
+    if (!btn.dataset.label) btn.dataset.label = btn.innerHTML;
+    btn.innerHTML = text;
+    setTimeout(()=>{ btn.innerHTML = btn.dataset.label; }, ms || 1400);
+  }
+
+  /* ---------- Named playlists (save with a name, load by name) ---------- */
+
+  // Autosave the current working set to the "last session" key so a refresh
+  // restores whatever the user was building, even if they never named it.
+  function persistLast(){
+    try{
+      const toSave = playlist.map(({url, title}) => ({url, title}));
+      localStorage.setItem(PLAYLIST_STORAGE_KEY, JSON.stringify(toSave));
+    } catch(e){ /* storage full/blocked — non-fatal */ }
+  }
+
+  function readNamedStore(){
+    try{
+      const raw = localStorage.getItem(NAMED_STORAGE_KEY);
+      const obj = raw ? JSON.parse(raw) : {};
+      return (obj && typeof obj === 'object' && !Array.isArray(obj)) ? obj : {};
+    } catch(e){ return {}; }
+  }
+  function writeNamedStore(obj){
+    localStorage.setItem(NAMED_STORAGE_KEY, JSON.stringify(obj));
+  }
+
+  /* ---------- Modal helpers ---------- */
+  const modal = document.getElementById('modal');
+  const modalCard = document.getElementById('modalCard');
+  function closeModal(){ modal.classList.remove('show'); modalCard.innerHTML = ''; }
+  modal.addEventListener('click', (e)=>{ if (e.target === modal) closeModal(); });
+  document.addEventListener('keydown', (e)=>{
+    // don't close the underlying modal if a confirm dialog is stacked on top
+    if (e.key === 'Escape' && modal.classList.contains('show') && !confirmModal.classList.contains('show')) closeModal();
+  });
+
+  // Custom confirm dialog (replaces window.confirm) — returns a Promise<boolean>.
+  const confirmModal = document.getElementById('confirmModal');
+  const confirmCard = document.getElementById('confirmCard');
+  let confirmResolve = null;
+  function closeConfirm(result){
+    confirmModal.classList.remove('show');
+    confirmCard.innerHTML = '';
+    const r = confirmResolve; confirmResolve = null;
+    if (r) r(result);
+  }
+  function showConfirm(opts){
+    opts = opts || {};
+    return new Promise((resolve)=>{
+      // if a previous confirm is somehow open, resolve it false first
+      if (confirmResolve){ const prev = confirmResolve; confirmResolve = null; prev(false); }
+      confirmResolve = resolve;
+      const okClass = 'btn wide ' + (opts.danger ? 'danger' : 'primary');
+      confirmCard.innerHTML = `
+        <div class="modal-head"><h3>${escapeHtml(opts.title || 'ยืนยัน')}</h3></div>
+        <div class="modal-body"><div class="modal-msg">${opts.messageHtml || escapeHtml(opts.message || '')}</div></div>
+        <div class="modal-foot">
+          <button class="btn wide" id="cCancel">${escapeHtml(opts.cancelText || 'ยกเลิก')}</button>
+          <button class="${okClass}" id="cOk">${escapeHtml(opts.confirmText || 'ตกลง')}</button>
+        </div>`;
+      confirmModal.classList.add('show');
+      const okBtn = confirmCard.querySelector('#cOk');
+      okBtn.focus();
+      okBtn.addEventListener('click', ()=> closeConfirm(true));
+      confirmCard.querySelector('#cCancel').addEventListener('click', ()=> closeConfirm(false));
+    });
+  }
+  confirmModal.addEventListener('click', (e)=>{ if (e.target === confirmModal) closeConfirm(false); });
+  document.addEventListener('keydown', (e)=>{
+    if (!confirmModal.classList.contains('show')) return;
+    if (e.key === 'Escape') closeConfirm(false);
+    else if (e.key === 'Enter') closeConfirm(true);
+  });
+
+  const CLOSE_ICON = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg>';
+
+  function fmtDate(ts){
+    if (!ts) return '';
+    try{ return new Date(ts).toLocaleString('th-TH', { dateStyle:'medium', timeStyle:'short' }); }
+    catch(e){ return ''; }
+  }
+
+  function openSaveModal(){
+    if (playlist.length === 0){
+      showToast('เพลย์ลิสต์ว่างเปล่า ยังไม่มีอะไรให้บันทึก', 'warn');
+      return;
+    }
+    const store = readNamedStore();
+    const names = Object.keys(store);
+    const datalist = names.map(n => `<option value="${escapeHtml(n)}"></option>`).join('');
+    modalCard.innerHTML = `
+      <div class="modal-head">
+        <h3>บันทึกเพลย์ลิสต์</h3>
+        <button class="modal-close" id="mClose" title="ปิด">${CLOSE_ICON}</button>
+      </div>
+      <div class="modal-body">
+        <label class="field-label" for="mName">ตั้งชื่อเพลย์ลิสต์ (${playlist.length} รายการ)</label>
+        <input type="text" id="mName" list="mNames" placeholder="เช่น เพลงงานเลี้ยง, รอบดึก…" autocomplete="off">
+        <datalist id="mNames">${datalist}</datalist>
+      </div>
+      <div class="modal-foot">
+        <button class="btn wide" id="mCancel">ยกเลิก</button>
+        <button class="btn wide primary" id="mSave">บันทึก</button>
+      </div>
+    `;
+    modal.classList.add('show');
+    const nameInput = modalCard.querySelector('#mName');
+    nameInput.focus();
+    modalCard.querySelector('#mClose').addEventListener('click', closeModal);
+    modalCard.querySelector('#mCancel').addEventListener('click', closeModal);
+    const doSave = async ()=>{
+      const name = nameInput.value.trim();
+      if (!name){ nameInput.focus(); showToast('กรุณาตั้งชื่อเพลย์ลิสต์ก่อน', 'warn'); return; }
+      const s = readNamedStore();
+      const exists = Object.prototype.hasOwnProperty.call(s, name);
+      if (exists){
+        const ok = await showConfirm({
+          title: 'เขียนทับเพลย์ลิสต์?',
+          messageHtml: `มีเพลย์ลิสต์ชื่อ <strong>"${escapeHtml(name)}"</strong> อยู่แล้ว<br>ต้องการบันทึกทับหรือไม่?`,
+          confirmText: 'เขียนทับ',
+          cancelText: 'ยกเลิก',
+          danger: true,
+        });
+        if (!ok) return;
+      }
+      s[name] = { items: playlist.map(({url, title}) => ({url, title})), savedAt: Date.now() };
+      try{ writeNamedStore(s); persistLast(); }
+      catch(e){ showToast('บันทึกไม่สำเร็จ: ' + e.message, 'error'); return; }
+      closeModal();
+      showToast(`บันทึก "${name}" แล้ว (${playlist.length} รายการ)`);
+    };
+    modalCard.querySelector('#mSave').addEventListener('click', doSave);
+    nameInput.addEventListener('keydown', (e)=>{ if (e.key === 'Enter'){ e.preventDefault(); doSave(); } });
+  }
+
+  function openLoadModal(){
+    const store = readNamedStore();
+    const names = Object.keys(store).sort((a,b)=> (store[b].savedAt||0) - (store[a].savedAt||0));
+    let bodyHtml;
+    if (names.length === 0){
+      bodyHtml = '<div class="modal-empty">ยังไม่มีเพลย์ลิสต์ที่บันทึกไว้<br>กด "บันทึก" เพื่อเก็บเพลย์ลิสต์แรกของคุณ</div>';
+    } else {
+      const rows = names.map(n => {
+        const cnt = (store[n].items || []).length;
+        const when = fmtDate(store[n].savedAt);
+        return `
+          <div class="saved-row" data-name="${escapeHtml(n)}" title="โหลด &quot;${escapeHtml(n)}&quot;">
+            <div class="info">
+              <div class="name">${escapeHtml(n)}</div>
+              <div class="sub">${cnt} รายการ${when ? ' · ' + escapeHtml(when) : ''}</div>
+            </div>
+            <button class="del" data-del="${escapeHtml(n)}" title="ลบเพลย์ลิสต์นี้">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M18 6 6 18M6 6l12 12"/></svg>
+            </button>
+          </div>`;
+      }).join('');
+      bodyHtml = `<div class="saved-list">${rows}</div>`;
+    }
+    modalCard.innerHTML = `
+      <div class="modal-head">
+        <h3>โหลดเพลย์ลิสต์</h3>
+        <button class="modal-close" id="mClose" title="ปิด">${CLOSE_ICON}</button>
+      </div>
+      <div class="modal-body">${bodyHtml}</div>
+    `;
+    modal.classList.add('show');
+    modalCard.querySelector('#mClose').addEventListener('click', closeModal);
+    modalCard.querySelectorAll('.saved-row').forEach(row=>{
+      row.addEventListener('click', (e)=>{
+        if (e.target.closest('[data-del]')) return;
+        loadNamed(row.dataset.name);
+      });
+    });
+    modalCard.querySelectorAll('[data-del]').forEach(btn=>{
+      btn.addEventListener('click', async (e)=>{
+        e.stopPropagation();
+        const name = btn.dataset.del;
+        const ok = await showConfirm({
+          title: 'ลบเพลย์ลิสต์?',
+          messageHtml: `ต้องการลบเพลย์ลิสต์ <strong>"${escapeHtml(name)}"</strong> ?<br>การลบนี้ย้อนกลับไม่ได้`,
+          confirmText: 'ลบ',
+          cancelText: 'ยกเลิก',
+          danger: true,
+        });
+        if (!ok) return;
+        const s = readNamedStore();
+        delete s[name];
+        try{ writeNamedStore(s); } catch(err){}
+        openLoadModal(); // re-render list
+        showToast(`ลบ "${name}" แล้ว`, 'warn');
+      });
+    });
+  }
+
+  function loadNamed(name){
+    const store = readNamedStore();
+    const entry = store[name];
+    const items = entry && Array.isArray(entry.items) ? entry.items : null;
+    if (!items || items.length === 0){
+      showToast(`เพลย์ลิสต์ "${name}" ว่างเปล่าหรือเสียหาย`, 'error');
+      return;
+    }
+    stopPlayback();
+    playlist = items.map(({url, title}) => ({url, title}));
+    currentIndex = -1;
+    renderPlaylist();
+    persistLast();
+    closeModal();
+    showToast(`โหลด "${name}" แล้ว (${playlist.length} รายการ)`);
+  }
+
+  savePlaylistBtn.addEventListener('click', openSaveModal);
+  loadPlaylistBtn.addEventListener('click', openLoadModal);
+
+  // Checks whether a single m3u8 URL is still reachable. Uses a real fetch
+  // (not no-cors) so we can read the actual HTTP status — this needs the
+  // same CORS support the player already requires for hls.js playback, so
+  // it's not a stricter requirement than what's needed to play the stream
+  // anyway. If the source blocks cross-origin fetches entirely, the result
+  // is 'unknown' rather than 'dead', since we genuinely can't tell.
+  async function checkOneUrl(url, timeoutMs){
+    const controller = new AbortController();
+    const timer = setTimeout(()=>controller.abort(), timeoutMs || 8000);
+    try{
+      const res = await fetch(url, { method:'GET', mode:'cors', cache:'no-store', signal: controller.signal });
+      return res.ok ? 'ok' : 'dead';
+    } catch(e){
+      return 'unknown'; // network error, CORS block, or timeout — ambiguous, not a confirmed failure
+    } finally{
+      clearTimeout(timer);
+    }
+  }
+
+  let isCheckingLinks = false;
+  checkLinksBtn.addEventListener('click', async ()=>{
+    if (isCheckingLinks || playlist.length === 0) return;
+    isCheckingLinks = true;
+    const originalLabel = checkLinksBtn.innerHTML;
+    const CONCURRENCY = 4;
+    let cursor = 0;
+
+    playlist.forEach(item => { item.status = 'checking'; });
+    renderPlaylist();
+
+    async function worker(){
+      while (cursor < playlist.length){
+        const i = cursor++;
+        const item = playlist[i];
+        item.status = await checkOneUrl(item.url, 8000);
+        renderPlaylist();
+      }
+    }
+
+    checkLinksBtn.innerHTML = 'กำลังตรวจสอบ…';
+    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, playlist.length) }, worker));
+    checkLinksBtn.innerHTML = originalLabel;
+    isCheckingLinks = false;
+  });
+
+  (function autoRestorePlaylist(){
+    try{
+      const raw = localStorage.getItem(PLAYLIST_STORAGE_KEY);
+      if (!raw) return;
+      const loaded = JSON.parse(raw);
+      if (Array.isArray(loaded) && loaded.length){
+        playlist = loaded;
+      }
+    } catch(e){ /* corrupt or inaccessible storage — safe to ignore */ }
+  })();
+
+  renderPlaylist();
+  setupMediaSession();
+
+  /* ---------- Chromecast ---------- */
+  // Maps the receiver-assigned queue itemId back to our local playlist index,
+  // so we can keep the UI in sync when the TV auto-advances on its own.
+  let itemIdToIndex = {};
+
+  window['__onGCastApiAvailable'] = function(isAvailable){
+    if (isAvailable){
+      initCast();
+    } else {
+      castStatus.textContent = 'CAST: ไม่พร้อมใช้งาน';
+    }
+  };
+
+  function initCast(){
+    try{
+      cast.framework.CastContext.getInstance().setOptions({
+        receiverApplicationId: chrome.cast.media.DEFAULT_MEDIA_RECEIVER_APP_ID,
+        autoJoinPolicy: chrome.cast.AutoJoinPolicy.ORIGIN_SCOPED
+      });
+      castAvailable = true;
+      castBtn.disabled = false;
+      castStatus.textContent = 'CAST: พร้อมใช้งาน';
+
+      remotePlayer = new cast.framework.RemotePlayer();
+      remotePlayerController = new cast.framework.RemotePlayerController(remotePlayer);
+      remotePlayerController.addEventListener(
+        cast.framework.RemotePlayerEventType.CURRENT_TIME_CHANGED, onRemoteTimeChanged);
+      remotePlayerController.addEventListener(
+        cast.framework.RemotePlayerEventType.DURATION_CHANGED, onRemoteTimeChanged);
+      remotePlayerController.addEventListener(
+        cast.framework.RemotePlayerEventType.VOLUME_LEVEL_CHANGED, onRemoteVolumeChanged);
+      remotePlayerController.addEventListener(
+        cast.framework.RemotePlayerEventType.IS_PAUSED_CHANGED, ()=>{
+          if (castSession) setPlayIcon(!remotePlayer.isPaused);
+        });
+
+      const context = cast.framework.CastContext.getInstance();
+      context.addEventListener(cast.framework.CastContextEventType.SESSION_STATE_CHANGED, (e)=>{
+        const state = e.sessionState;
+        if (state === cast.framework.SessionState.SESSION_STARTED || state === cast.framework.SessionState.SESSION_RESUMED){
+          castSession = context.getCurrentSession();
+          castBtn.classList.add('primary');
+          castSession.addMediaListener(onRemoteMediaLoaded);
+          if (currentIndex !== -1) castLoadQueue(currentIndex);
+          else castStatus.textContent = 'CAST: เชื่อมต่อแล้ว';
+        } else if (state === cast.framework.SessionState.SESSION_ENDED){
+          castSession = null;
+          itemIdToIndex = {};
+          castStatus.textContent = 'CAST: พร้อมใช้งาน';
+          castBtn.classList.remove('primary');
+        }
+      });
+    } catch(err){
+      console.error('Cast init failed', err);
+      castStatus.textContent = 'CAST: ใช้งานไม่ได้ในตัวอย่างนี้';
+    }
+  }
+
+  castBtn.addEventListener('click', async ()=>{
+    if (!castAvailable){
+      showToast('Google Cast SDK โหลดไม่สำเร็จ (มักเกิดขึ้นถ้าเปิดไฟล์นี้ในหน้าต่างตัวอย่างแบบฝัง/iframe) กรุณาดาวน์โหลดไฟล์นี้แล้วเปิดในแท็บเบราว์เซอร์จริงบนคอมพิวเตอร์ที่อยู่วง Wi-Fi เดียวกับ Android TV', 'error', 7000);
+      return;
+    }
+    const context = cast.framework.CastContext.getInstance();
+    try{
+      if (!castSession){
+        await context.requestSession();
+        castSession = context.getCurrentSession();
+        castSession.addMediaListener(onRemoteMediaLoaded);
+      }
+      castLoadQueue(currentIndex !== -1 ? currentIndex : 0);
+    } catch(err){
+      console.error(err);
+    }
+  });
+
+  // Builds one chrome.cast.media.QueueItem per playlist track. preloadTime is
+  // the receiver-side equivalent of our local dual-video buffering: it tells
+  // the TV itself to start fetching/buffering the next item a few seconds
+  // before the current one ends, so it can switch with no stall — without
+  // ever routing media through this browser tab.
+  function buildQueueItems(){
+    return playlist.map((item)=>{
+      const mediaInfo = new chrome.cast.media.MediaInfo(item.url, 'application/x-mpegURL');
+      mediaInfo.streamType = chrome.cast.media.StreamType.BUFFERED; // finite clips, not an endless live feed
+      mediaInfo.metadata = new chrome.cast.media.GenericMediaMetadata();
+      mediaInfo.metadata.title = item.title;
+      const qi = new chrome.cast.media.QueueItem(mediaInfo);
+      qi.autoplay = true;
+      qi.preloadTime = PRELOAD_SECONDS_BEFORE_END;
+      return qi;
+    });
+  }
+
+  function castLoadQueue(startIdx){
+    if (!castSession || playlist.length === 0) return;
+    const items = buildQueueItems();
+    const queueData = new chrome.cast.media.QueueData(
+      'console-m3u8-queue',
+      'WePlay Playlist',
+      '',
+      chrome.cast.media.RepeatMode.ALL,
+      items,
+      startIdx,
+      0
+    );
+    const request = new chrome.cast.media.LoadRequest(items[startIdx].media);
+    request.queueData = queueData;
+    castStatus.textContent = 'CAST: กำลังส่งคิวไปทีวี…';
+    castSession.loadMedia(request).then(
+      ()=>{ activeVideo().pause(); },
+      (err)=>{ console.error('Cast queue load error', err); castStatus.textContent = 'CAST: โหลดคิวไม่สำเร็จ'; }
+    );
+  }
+
+  // Fires whenever a new media/queue session is loaded on the receiver —
+  // rebuild the itemId↔playlist-index map and start listening for the
+  // receiver auto-advancing between queue items on its own.
+  function onRemoteMediaLoaded(media){
+    if (!media) return;
+    itemIdToIndex = {};
+    if (media.items){
+      media.items.forEach((qi, i)=>{ itemIdToIndex[qi.itemId] = i; });
+    }
+    onRemoteMediaUpdate(media);
+    media.addUpdateListener(()=> onRemoteMediaUpdate(media));
+  }
+
+  function onRemoteMediaUpdate(media){
+    if (media.currentItemId == null) return;
+    const idx = itemIdToIndex[media.currentItemId];
+    if (idx == null || playlist[idx] == null) return;
+    currentIndex = idx;
+    const item = playlist[idx];
+    metaTitle.textContent = item.title;
+    metaUrl.textContent = item.url;
+    videoEmpty.style.display = 'none';
+    nowBadge.classList.add('show');
+    tally.classList.add('live');
+    castStatus.textContent = 'CAST: กำลังเล่น ' + (idx+1) + '/' + playlist.length + ' บนทีวี';
+    renderPlaylist();
+  }
+
+  function remoteQueueNext(){
+    const media = castSession && castSession.getMediaSession();
+    if (media) media.queueNext(null, ()=>{}, (err)=>console.error(err));
+  }
+  function remoteQueuePrev(){
+    const media = castSession && castSession.getMediaSession();
+    if (media) media.queuePrev(null, ()=>{}, (err)=>console.error(err));
+  }
+  function remoteQueueJump(i){
+    const media = castSession && castSession.getMediaSession();
+    if (!media) return;
+    const itemId = Object.keys(itemIdToIndex).find(id => itemIdToIndex[id] === i);
+    if (itemId != null) media.queueJumpToItem(parseInt(itemId, 10), null, ()=>{}, (err)=>console.error(err));
+  }
+
+  // Keep the seek bar + timecode in sync with what's actually playing on the
+  // TV. Skipped while the user is mid-drag so we don't fight their gesture.
+  function onRemoteTimeChanged(){
+    if (!castSession || !remotePlayer || !remotePlayer.isMediaLoaded) return;
+    if (remotePlayer.duration > 0){
+      if (!isDraggingSeek) seekBar.value = (remotePlayer.currentTime / remotePlayer.duration * 100) || 0;
+      timecode.textContent = fmtTime(remotePlayer.currentTime) + ' / ' + fmtTime(remotePlayer.duration);
+    }
+  }
+  function onRemoteVolumeChanged(){
+    if (!castSession || !remotePlayer) return;
+    if (!isDraggingVol) volBar.value = remotePlayer.volumeLevel;
+  }
+
+  // Load Cast sender SDK
+  (function loadCastSdk(){
+    const s = document.createElement('script');
+    s.src = 'https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1';
+    s.onerror = ()=>{ castStatus.textContent = 'CAST: โหลด SDK ไม่สำเร็จ'; };
+    document.head.appendChild(s);
+    setTimeout(()=>{
+      if (!castAvailable){
+        castStatus.textContent = 'CAST: ใช้งานไม่ได้ในตัวอย่างนี้ (ลองเปิดไฟล์จริง)';
+      }
+    }, 4000);
+  })();
+
+})();
+</script>
+
+</body>
+</html>
