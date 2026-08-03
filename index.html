@@ -417,6 +417,17 @@
     letter-spacing:0.06em;
     vertical-align:middle;
   }
+  .local-tag{
+    font-family:var(--font-mono);
+    font-size:14px;
+    color:var(--muted);
+    border:1px solid rgba(139,144,160,0.35);
+    border-radius:3px;
+    padding:1px 5px;
+    margin-left:8px;
+    letter-spacing:0.06em;
+    vertical-align:middle;
+  }
   .status-tag{
     font-family:var(--font-mono);
     font-size:14px;
@@ -738,10 +749,15 @@
           <button type="submit" class="btn wide primary" style="width:auto;">เพิ่ม</button>
         </div>
       </form>
+      <button type="button" class="btn wide" id="openFileBtn" style="width:100%;margin-top:6px;">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>
+        เปิดไฟล์ (MP4 / MKV / WebM)
+      </button>
+      <input type="file" id="fileInput" accept="video/*" multiple style="display:none;">
     </div>
     <div class="playlist" id="playlist">
       <div class="empty-state" id="emptyState">
-        เพลย์ลิสต์ว่างเปล่า<br>เพิ่มลิงก์ M3U8 ด้านบนเพื่อเริ่มต้น
+        เพลย์ลิสต์ว่างเปล่า<br>เพิ่มลิงก์ M3U8 หรือเปิดไฟล์วิดีโอจากแผงด้านขวา
       </div>
     </div>
     <div class="footer-note">
@@ -854,6 +870,7 @@
       const t = document.createElement('div');
       t.className = 'track' + (i === currentIndex ? ' active' : '') + (item.status === 'dead' ? ' status-dead' : '');
       t.setAttribute('draggable', 'true');
+      const localTag = item.url.startsWith('blob:') ? '<span class="local-tag">LOCAL</span>' : '';
       const readyTag = (i === preloadedIdx && i !== currentIndex) ? '<span class="ready-tag">BUFFERED</span>' : '';
       const statusTag = STATUS_TAG_HTML[item.status] || '';
       t.innerHTML = `
@@ -863,8 +880,8 @@
         <span class="idx">${(i+1).toString().padStart(2,'0')}</span>
         <span class="track-tally"></span>
         <div class="track-info">
-          <div class="track-title">${escapeHtml(item.title)}${readyTag}${statusTag}</div>
-          <div class="track-url">${escapeHtml(item.url)}</div>
+          <div class="track-title">${escapeHtml(item.title)}${localTag}${readyTag}${statusTag}</div>
+          <div class="track-url">${escapeHtml(item.fileName || item.url)}</div>
         </div>
         <div class="track-actions">
           <button class="mini-btn" data-act="up" title="เลื่อนขึ้น">
@@ -973,10 +990,12 @@
 
   function resetSlot(slot){
     const p = players[slot];
+    if (p.stallTimer){ clearInterval(p.stallTimer); p.stallTimer = null; }
     if (p.hls){ p.hls.destroy(); p.hls = null; }
+    p.el.onerror = null;
     p.el.pause();
     p.el.removeAttribute('src');
-    p.el.load();
+    p.el.load();  // correct here: fully resets slot to idle state
     p.forIndex = -1;
   }
 
@@ -990,38 +1009,116 @@
     players[1].el.classList.toggle('front', activeSlot === 1);
   }
 
+  // blob: URLs come from URL.createObjectURL for local files — always native, never HLS
+  function isHlsContent(url){
+    if (!url || url.startsWith('blob:')) return false;
+    const p = url.toLowerCase().split('?')[0];
+    return p.endsWith('.m3u8') || p.endsWith('.m3u');
+  }
+
+  // Watchdog: if currentTime stops advancing while readyState is low (buffering),
+  // call startLoad() to restart fragment fetching. Avoids calling recoverMediaError()
+  // for buffer stalls — that resets MediaSource and causes a visible jump.
+  function setupStallWatchdog(slot){
+    const p = players[slot];
+    if (p.stallTimer){ clearInterval(p.stallTimer); p.stallTimer = null; }
+    let lastTime = -1, stallTicks = 0;
+    p.stallTimer = setInterval(()=>{
+      if (slot !== activeSlot){ clearInterval(p.stallTimer); p.stallTimer = null; return; }
+      const el = p.el;
+      if (el.paused || el.ended) return; // user paused or track ended — not a stall
+      const cur = el.currentTime;
+      if (cur !== lastTime){ lastTime = cur; stallTicks = 0; return; }
+      // currentTime hasn't moved and we're not fully buffered
+      if (el.readyState < 3){ // HAVE_FUTURE_DATA
+        stallTicks++;
+        if (stallTicks >= 3){
+          stallTicks = 0;
+          if (p.hls){
+            try{ p.hls.startLoad(); }catch(e){}
+            setTimeout(()=>{ try{ el.play(); }catch(e){} }, 500);
+          } else {
+            try{ el.play(); }catch(e){}
+          }
+        }
+      } else {
+        stallTicks = 0;
+      }
+    }, 5000);
+  }
+
   // Loads a URL into a given slot. autoplay=true only for the visible/active slot;
   // background preloads stay paused (muted) so hls.js just buffers silently.
+  // NOTE: no explicit el.load() here — hls.destroy() calls it internally for HLS,
+  // and the browser runs the load algorithm automatically when el.src changes.
+  // An extra el.load() before attachMedia() races with MediaSource setup → MANIFEST_PARSED
+  // never fires → autoplay never starts. Keep el.load() in resetSlot only (idle cleanup).
   function loadIntoSlot(slot, url, autoplay){
     const p = players[slot];
+    if (p.stallTimer){ clearInterval(p.stallTimer); p.stallTimer = null; }
     if (p.hls){ p.hls.destroy(); p.hls = null; }
+    p.el.onerror = null;
+    p.el.pause();
+    p.el.removeAttribute('src');
     const el = p.el;
-    if (window.Hls && Hls.isSupported()){
-      const inst = new Hls({ enableWorker:true });
-      p.hls = inst;
-      inst.loadSource(url);
-      inst.attachMedia(el);
-      inst.on(Hls.Events.MANIFEST_PARSED, ()=>{
+
+    if (isHlsContent(url)){
+      if (window.Hls && Hls.isSupported()){
+        let netRetries = 0, mediaRetries = 0;
+        const inst = new Hls({
+          enableWorker: true,
+          maxBufferLength: 30, maxMaxBufferLength: 600,
+          maxBufferSize: 60 * 1000 * 1000, maxBufferHole: 0.5,
+          highBufferWatchdogPeriod: 2, nudgeOffset: 0.1, nudgeMaxRetry: 5,
+          manifestLoadingMaxRetry: 6, manifestLoadingRetryDelay: 1000,
+          levelLoadingMaxRetry: 6, levelLoadingRetryDelay: 1000,
+          fragLoadingMaxRetry: 6, fragLoadingRetryDelay: 500,
+          startFragPrefetch: true,
+        });
+        p.hls = inst;
+        inst.loadSource(url);
+        inst.attachMedia(el);
+        inst.on(Hls.Events.MANIFEST_PARSED, ()=>{
+          netRetries = 0; mediaRetries = 0;
+          if (autoplay) el.play().catch(()=>{});
+        });
+        inst.on(Hls.Events.ERROR, (evt, data)=>{
+          if (!data.fatal){
+            // DO NOT call recoverMediaError() for BUFFER_STALLED — hls.js handles it
+            // internally via nudge config; recoverMediaError resets MediaSource → jump
+            return;
+          }
+          if (data.type === Hls.ErrorTypes.NETWORK_ERROR && netRetries < 4){
+            netRetries++;
+            setTimeout(()=>{ try{ inst.startLoad(); }catch(e){} }, 1500 * netRetries);
+          } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR && mediaRetries < 3){
+            mediaRetries++;
+            try{ inst.recoverMediaError(); }catch(e){}
+          } else {
+            const idx = p.forIndex;
+            if (idx >= 0 && playlist[idx]){ playlist[idx].status = 'dead'; renderPlaylist(); }
+            if (slot === activeSlot) handlePlaybackFailure();
+          }
+        });
+      } else if (el.canPlayType('application/vnd.apple.mpegurl')){
+        // Safari native HLS
+        el.src = url;
         if (autoplay) el.play().catch(()=>{});
-      });
-      inst.on(Hls.Events.ERROR, (evt, data)=>{
-        if (!data.fatal) return;
-        console.error('HLS fatal error (slot ' + slot + ')', data);
-        const idx = players[slot].forIndex;
-        if (idx != null && idx >= 0 && playlist[idx]){
-          playlist[idx].status = 'dead';
-          renderPlaylist();
-        }
-        if (slot === activeSlot) handlePlaybackFailure();
-        // if it was just the background preload slot, no need to do anything —
-        // the normal fresh-load fallback in goTo()/onEnded retries when we get there
-      });
-    } else if (el.canPlayType('application/vnd.apple.mpegurl')){
+      } else if (autoplay){
+        showToast('เบราว์เซอร์นี้ไม่รองรับการเล่น M3U8', 'error');
+      }
+    } else {
+      // Native video — MP4, WebM, MKV, local blob URLs
       el.src = url;
+      el.onerror = ()=>{
+        el.onerror = null;
+        const idx = p.forIndex;
+        if (idx >= 0 && playlist[idx]){ playlist[idx].status = 'dead'; renderPlaylist(); }
+        if (slot === activeSlot) handlePlaybackFailure();
+      };
       if (autoplay) el.play().catch(()=>{});
-    } else if (autoplay){
-      showToast('เบราว์เซอร์นี้ไม่รองรับการเล่น M3U8', 'error');
     }
+    if (autoplay) setupStallWatchdog(slot);
   }
 
   // Called when the track actually being watched fails to load. Marks it dead
@@ -1058,7 +1155,7 @@
 
   function finalizeSwitch(item){
     metaTitle.textContent = item.title;
-    metaUrl.textContent = item.url;
+    metaUrl.textContent = item.fileName || item.url;
     videoEmpty.style.display = 'none';
     nowBadge.classList.add('show');
     preloadBadge.classList.remove('show');
@@ -1136,7 +1233,7 @@
     const item = playlist[i];
     const back = inactiveSlot();
 
-    if (players[back].forIndex === i && players[back].hls){
+    if (players[back].forIndex === i && (players[back].hls || players[back].el.src)){
       // instant, gapless swap — the background video is already buffered
       const oldSlot = activeSlot;
       activeSlot = back;
@@ -1225,8 +1322,30 @@
   fsBtn.addEventListener('click', toggleFullscreen);
   videoWrap.addEventListener('dblclick', toggleFullscreen);
   document.addEventListener('keydown', (e)=>{
+    if (document.activeElement.tagName === 'INPUT') return;
     if (e.key === 'f' || e.key === 'F'){
-      if (document.activeElement.tagName !== 'INPUT') toggleFullscreen();
+      toggleFullscreen();
+    } else if (e.key === ' '){
+      e.preventDefault();
+      playBtn.click();
+    } else if (e.key === 'ArrowLeft'){
+      e.preventDefault();
+      if (castSession && remotePlayer && remotePlayer.isMediaLoaded && remotePlayer.duration > 0){
+        remotePlayer.currentTime = Math.max(0, remotePlayer.currentTime - 10);
+        remotePlayerController.seek();
+      } else {
+        const el = activeVideo();
+        if (isFinite(el.duration) && el.duration > 0) el.currentTime = Math.max(0, el.currentTime - 10);
+      }
+    } else if (e.key === 'ArrowRight'){
+      e.preventDefault();
+      if (castSession && remotePlayer && remotePlayer.isMediaLoaded && remotePlayer.duration > 0){
+        remotePlayer.currentTime = Math.min(remotePlayer.duration, remotePlayer.currentTime + 10);
+        remotePlayerController.seek();
+      } else {
+        const el = activeVideo();
+        if (isFinite(el.duration) && el.duration > 0) el.currentTime = Math.min(el.duration, el.currentTime + 10);
+      }
     }
   });
   const fsHint = document.getElementById('fsHint');
@@ -1264,10 +1383,18 @@
     });
     p.el.addEventListener('timeupdate', ()=>{
       if (slot !== activeSlot) return;
-      if (!isFinite(p.el.duration)) return;
-      seekBar.value = (p.el.currentTime/p.el.duration*100) || 0;
-      timecode.textContent = fmtTime(p.el.currentTime) + ' / ' + fmtTime(p.el.duration);
-      maybePreloadNext(p.el);
+      const cur = p.el.currentTime, dur = p.el.duration;
+      if (isFinite(dur) && dur > 0){
+        if (!isDraggingSeek) seekBar.value = (cur/dur*100) || 0;
+        seekBar.disabled = false;
+        timecode.textContent = fmtTime(cur) + ' / ' + fmtTime(dur);
+        maybePreloadNext(p.el);
+      } else {
+        // Live stream — duration is Infinity; show elapsed time and lock seek bar
+        seekBar.value = 100;
+        seekBar.disabled = true;
+        if (cur > 0) timecode.textContent = fmtTime(cur);
+      }
     });
   });
 
@@ -1293,24 +1420,31 @@
 
   seekBar.addEventListener('pointerdown', ()=>{ isDraggingSeek = true; });
   window.addEventListener('pointerup', ()=>{ isDraggingSeek = false; });
+  // While dragging: preview timecode only — avoids HLS fragment-load thrashing
   seekBar.addEventListener('input', ()=>{
     if (castSession){
-      // Show an optimistic timecode while dragging; the actual seek is only
-      // sent to the TV on release (see 'change' below) to avoid spamming it.
       if (remotePlayer && remotePlayer.duration > 0){
         timecode.textContent = fmtTime(seekBar.value/100 * remotePlayer.duration) + ' / ' + fmtTime(remotePlayer.duration);
       }
       return;
     }
     const el = activeVideo();
-    if (isFinite(el.duration)){
-      el.currentTime = (seekBar.value/100) * el.duration;
+    if (isFinite(el.duration) && el.duration > 0){
+      timecode.textContent = fmtTime((seekBar.value/100)*el.duration) + ' / ' + fmtTime(el.duration);
     }
   });
+  // Commit the seek on release (or single click)
   seekBar.addEventListener('change', ()=>{
-    if (!castSession || !remotePlayer || !remotePlayer.duration) return;
-    remotePlayer.currentTime = (seekBar.value/100) * remotePlayer.duration;
-    remotePlayerController.seek();
+    if (castSession){
+      if (!remotePlayer || !remotePlayer.duration) return;
+      remotePlayer.currentTime = (seekBar.value/100) * remotePlayer.duration;
+      remotePlayerController.seek();
+      return;
+    }
+    const el = activeVideo();
+    if (isFinite(el.duration) && el.duration > 0){
+      el.currentTime = (seekBar.value/100) * el.duration;
+    }
   });
 
   volBar.addEventListener('pointerdown', ()=>{ isDraggingVol = true; });
@@ -1350,7 +1484,7 @@
   // restores whatever the user was building, even if they never named it.
   function persistLast(){
     try{
-      const toSave = playlist.map(({url, title}) => ({url, title}));
+      const toSave = playlist.filter(item => !item.url.startsWith('blob:')).map(({url, title}) => ({url, title}));
       localStorage.setItem(PLAYLIST_STORAGE_KEY, JSON.stringify(toSave));
     } catch(e){ /* storage full/blocked — non-fatal */ }
   }
@@ -1564,7 +1698,11 @@
     const controller = new AbortController();
     const timer = setTimeout(()=>controller.abort(), timeoutMs || 8000);
     try{
-      const res = await fetch(url, { method:'GET', mode:'cors', cache:'no-store', signal: controller.signal });
+      // HEAD avoids downloading the full content; fall back to GET if server rejects HEAD (405)
+      let res = await fetch(url, { method:'HEAD', mode:'cors', cache:'no-store', signal: controller.signal });
+      if (!res.ok && res.status === 405){
+        res = await fetch(url, { method:'GET', mode:'cors', cache:'no-store', signal: controller.signal });
+      }
       return res.ok ? 'ok' : 'dead';
     } catch(e){
       return 'unknown'; // network error, CORS block, or timeout — ambiguous, not a confirmed failure
@@ -1605,7 +1743,7 @@
       if (!raw) return;
       const loaded = JSON.parse(raw);
       if (Array.isArray(loaded) && loaded.length){
-        playlist = loaded;
+        playlist = loaded.filter(item => item && item.url && !item.url.startsWith('blob:'));
       }
     } catch(e){ /* corrupt or inaccessible storage — safe to ignore */ }
   })();
@@ -1617,6 +1755,15 @@
   // Maps the receiver-assigned queue itemId back to our local playlist index,
   // so we can keep the UI in sync when the TV auto-advances on its own.
   let itemIdToIndex = {};
+  let castPlaylistMap = []; // cast-queue index → full playlist index (local files are skipped)
+
+  const CAST_BTN_ON  = '<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 20h.01M2 16.5a5 5 0 0 1 5 5M2 12a9 9 0 0 1 9 9M14 4h6a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-6"/></svg> CAST';
+  const CAST_BTN_OFF = '<svg width="19" height="19" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="5" width="14" height="14" rx="2"/></svg> STOP';
+  function updateCastBtnState(casting){
+    castBtn.innerHTML = casting ? CAST_BTN_OFF : CAST_BTN_ON;
+    castBtn.title     = casting ? 'หยุดและตัดการเชื่อมต่อ Cast' : 'แคสต์ไปยังทีวี';
+    castBtn.classList.toggle('primary', casting);
+  }
 
   window['__onGCastApiAvailable'] = function(isAvailable){
     if (isAvailable){
@@ -1654,15 +1801,18 @@
         const state = e.sessionState;
         if (state === cast.framework.SessionState.SESSION_STARTED || state === cast.framework.SessionState.SESSION_RESUMED){
           castSession = context.getCurrentSession();
-          castBtn.classList.add('primary');
+          updateCastBtnState(true);
           castSession.addMediaListener(onRemoteMediaLoaded);
           if (currentIndex !== -1) castLoadQueue(currentIndex);
           else castStatus.textContent = 'CAST: เชื่อมต่อแล้ว';
         } else if (state === cast.framework.SessionState.SESSION_ENDED){
           castSession = null;
           itemIdToIndex = {};
+          castPlaylistMap = [];
           castStatus.textContent = 'CAST: พร้อมใช้งาน';
-          castBtn.classList.remove('primary');
+          updateCastBtnState(false);
+          // Resume local playback
+          if (currentIndex !== -1) goTo(currentIndex);
         }
       });
     } catch(err){
@@ -1677,49 +1827,56 @@
       return;
     }
     const context = cast.framework.CastContext.getInstance();
+    // If already casting — stop and disconnect
+    if (castSession){
+      try{ context.endCurrentSession(true); }catch(e){ console.error(e); }
+      return;
+    }
     try{
-      if (!castSession){
-        await context.requestSession();
-        castSession = context.getCurrentSession();
-        castSession.addMediaListener(onRemoteMediaLoaded);
-      }
+      await context.requestSession();
+      castSession = context.getCurrentSession();
+      castSession.addMediaListener(onRemoteMediaLoaded);
       castLoadQueue(currentIndex !== -1 ? currentIndex : 0);
     } catch(err){
       console.error(err);
     }
   });
 
-  // Builds one chrome.cast.media.QueueItem per playlist track. preloadTime is
-  // the receiver-side equivalent of our local dual-video buffering: it tells
-  // the TV itself to start fetching/buffering the next item a few seconds
-  // before the current one ends, so it can switch with no stall — without
-  // ever routing media through this browser tab.
-  function buildQueueItems(){
-    return playlist.map((item)=>{
+  // Builds cast queue skipping local files (blob: URLs are device-only — TV can't reach them).
+  // castPlaylistMap[castQueueIdx] = full playlist index, so itemIdToIndex maps correctly.
+  function castLoadQueue(startIdx){
+    if (!castSession || playlist.length === 0) return;
+
+    castPlaylistMap = [];
+    const items = [];
+    playlist.forEach((item, pi)=>{
+      if (item.url.startsWith('blob:')) return;
+      castPlaylistMap.push(pi);
       const mediaInfo = new chrome.cast.media.MediaInfo(item.url, 'application/x-mpegURL');
-      mediaInfo.streamType = chrome.cast.media.StreamType.BUFFERED; // finite clips, not an endless live feed
+      mediaInfo.streamType = chrome.cast.media.StreamType.BUFFERED;
       mediaInfo.metadata = new chrome.cast.media.GenericMediaMetadata();
       mediaInfo.metadata.title = item.title;
       const qi = new chrome.cast.media.QueueItem(mediaInfo);
       qi.autoplay = true;
       qi.preloadTime = PRELOAD_SECONDS_BEFORE_END;
-      return qi;
+      items.push(qi);
     });
-  }
 
-  function castLoadQueue(startIdx){
-    if (!castSession || playlist.length === 0) return;
-    const items = buildQueueItems();
+    if (items.length === 0){
+      showToast('ไม่มีรายการที่ Cast ได้ — ไฟล์ LOCAL เล่นบนเครื่องเท่านั้น', 'error', 5000);
+      return;
+    }
+    const skipped = playlist.length - items.length;
+    if (skipped > 0) showToast(`ข้าม ${skipped} ไฟล์ LOCAL ที่ Cast ไม่ได้`, 'warn', 4000);
+
+    let castStart = castPlaylistMap.findIndex(pi => pi >= startIdx);
+    if (castStart < 0) castStart = 0;
+
     const queueData = new chrome.cast.media.QueueData(
-      'console-m3u8-queue',
-      'WePlay Playlist',
-      '',
-      chrome.cast.media.RepeatMode.ALL,
-      items,
-      startIdx,
-      0
+      'console-m3u8-queue', 'WePlay Playlist', '',
+      chrome.cast.media.RepeatMode.ALL, items, castStart, 0
     );
-    const request = new chrome.cast.media.LoadRequest(items[startIdx].media);
+    const request = new chrome.cast.media.LoadRequest(items[castStart].media);
     request.queueData = queueData;
     castStatus.textContent = 'CAST: กำลังส่งคิวไปทีวี…';
     castSession.loadMedia(request).then(
@@ -1735,7 +1892,10 @@
     if (!media) return;
     itemIdToIndex = {};
     if (media.items){
-      media.items.forEach((qi, i)=>{ itemIdToIndex[qi.itemId] = i; });
+      media.items.forEach((qi, castIdx)=>{
+        const pi = castPlaylistMap[castIdx] != null ? castPlaylistMap[castIdx] : castIdx;
+        itemIdToIndex[qi.itemId] = pi;
+      });
     }
     onRemoteMediaUpdate(media);
     media.addUpdateListener(()=> onRemoteMediaUpdate(media));
@@ -1748,7 +1908,7 @@
     currentIndex = idx;
     const item = playlist[idx];
     metaTitle.textContent = item.title;
-    metaUrl.textContent = item.url;
+    metaUrl.textContent = item.fileName || item.url;
     videoEmpty.style.display = 'none';
     nowBadge.classList.add('show');
     tally.classList.add('live');
@@ -1784,6 +1944,29 @@
     if (!castSession || !remotePlayer) return;
     if (!isDraggingVol) volBar.value = remotePlayer.volumeLevel;
   }
+
+  /* ---------- Local file picker ---------- */
+  const fileInput = document.getElementById('fileInput');
+  const openFileBtn = document.getElementById('openFileBtn');
+
+  openFileBtn.addEventListener('click', ()=>{ fileInput.click(); });
+
+  fileInput.addEventListener('change', ()=>{
+    const files = Array.from(fileInput.files || []);
+    if (!files.length) return;
+    let added = 0;
+    files.forEach(file=>{
+      const url = URL.createObjectURL(file);
+      const title = file.name.replace(/\.[^.]+$/, '');  // strip extension for display
+      playlist.push({ url, title, fileName: file.name });
+      added++;
+    });
+    fileInput.value = '';   // reset so same file can be picked again
+    renderPlaylist();
+    persistLast();
+    if (added) showToast(`เพิ่มไฟล์วิดีโอ ${added} ไฟล์แล้ว`);
+    if (currentIndex === -1 && added) goTo(0);
+  });
 
   // Load Cast sender SDK
   (function loadCastSdk(){
