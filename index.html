@@ -1882,11 +1882,17 @@
 
     const request = new chrome.cast.media.LoadRequest(items[castStart].media);
     request.queueData = queueData;
+    request.autoplay = true; // explicit — some receivers ignore QueueItem.autoplay on first load
     castStatus.textContent = 'CAST: กำลังส่งคิวไปทีวี…';
-    castSession.loadMedia(request).then(
-      ()=>{ activeVideo().pause(); },
-      (err)=>{ console.error('Cast queue load error', err); castStatus.textContent = 'CAST: โหลดคิวไม่สำเร็จ'; }
-    );
+    castSession.loadMedia(request).then(()=>{
+      activeVideo().pause();
+      // Some receivers load in paused state despite autoplay=true — send play after a short delay
+      setTimeout(()=>{
+        if (castSession && remotePlayer && remotePlayer.isMediaLoaded && remotePlayer.isPaused){
+          remotePlayerController.playOrPause();
+        }
+      }, 1500);
+    }, (err)=>{ console.error('Cast queue load error', err); castStatus.textContent = 'CAST: โหลดคิวไม่สำเร็จ'; });
   }
 
   // Fires whenever a new media/queue session is loaded on the receiver —
