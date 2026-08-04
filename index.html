@@ -1019,28 +1019,25 @@
   // Watchdog: if currentTime stops advancing while readyState is low (buffering),
   // call startLoad() to restart fragment fetching. Avoids calling recoverMediaError()
   // for buffer stalls — that resets MediaSource and causes a visible jump.
+  // Stall watchdog for NATIVE VIDEO (MP4) only.
+  // HLS streams must NOT use startLoad() externally — hls.js has its own stall detection
+  // (highBufferWatchdogPeriod + nudge) and calling startLoad() on a live instance causes
+  // it to seek to an undefined position, making content jump back and forth.
+  // For native video, a simple el.play() retry is safe and sufficient.
   function setupStallWatchdog(slot){
     const p = players[slot];
     if (p.stallTimer){ clearInterval(p.stallTimer); p.stallTimer = null; }
+    if (p.hls) return; // hls.js manages its own recovery — no external watchdog needed
     let lastTime = -1, stallTicks = 0;
     p.stallTimer = setInterval(()=>{
       if (slot !== activeSlot){ clearInterval(p.stallTimer); p.stallTimer = null; return; }
       const el = p.el;
-      if (el.paused || el.ended) return; // user paused or track ended — not a stall
+      if (el.paused || el.ended) return;
       const cur = el.currentTime;
       if (cur !== lastTime){ lastTime = cur; stallTicks = 0; return; }
-      // currentTime hasn't moved and we're not fully buffered
-      if (el.readyState < 3){ // HAVE_FUTURE_DATA
+      if (el.readyState < 3){
         stallTicks++;
-        if (stallTicks >= 3){
-          stallTicks = 0;
-          if (p.hls){
-            try{ p.hls.startLoad(); }catch(e){}
-            setTimeout(()=>{ try{ el.play(); }catch(e){} }, 500);
-          } else {
-            try{ el.play(); }catch(e){}
-          }
-        }
+        if (stallTicks >= 3){ stallTicks = 0; try{ el.play(); }catch(e){} }
       } else {
         stallTicks = 0;
       }
@@ -1068,7 +1065,7 @@
         const inst = new Hls({
           enableWorker: true,
           maxBufferLength: 30, maxMaxBufferLength: 600,
-          maxBufferSize: 60 * 1000 * 1000, maxBufferHole: 0.5,
+          maxBufferSize: 60 * 1000 * 1000, maxBufferHole: 0.1,
           highBufferWatchdogPeriod: 2, nudgeOffset: 0.1, nudgeMaxRetry: 5,
           manifestLoadingMaxRetry: 6, manifestLoadingRetryDelay: 1000,
           levelLoadingMaxRetry: 6, levelLoadingRetryDelay: 1000,
@@ -1803,8 +1800,11 @@
           castSession = context.getCurrentSession();
           updateCastBtnState(true);
           castSession.addMediaListener(onRemoteMediaLoaded);
-          if (currentIndex !== -1) castLoadQueue(currentIndex);
-          else castStatus.textContent = 'CAST: เชื่อมต่อแล้ว';
+          if (playlist.length > 0){
+            castLoadQueue(currentIndex !== -1 ? currentIndex : 0);
+          } else {
+            castStatus.textContent = 'CAST: เชื่อมต่อแล้ว — เพิ่มรายการเพื่อเริ่มเล่น';
+          }
         } else if (state === cast.framework.SessionState.SESSION_ENDED){
           castSession = null;
           itemIdToIndex = {};
@@ -1834,10 +1834,10 @@
     }
     try{
       await context.requestSession();
-      castSession = context.getCurrentSession();
-      castSession.addMediaListener(onRemoteMediaLoaded);
-      castLoadQueue(currentIndex !== -1 ? currentIndex : 0);
+      // SESSION_STATE_CHANGED handles addMediaListener + castLoadQueue —
+      // do NOT duplicate here or loadMedia fires twice and the TV rejects one.
     } catch(err){
+      // user cancelled the device picker — silent
       console.error(err);
     }
   });
@@ -1850,9 +1850,11 @@
     castPlaylistMap = [];
     const items = [];
     playlist.forEach((item, pi)=>{
-      if (item.url.startsWith('blob:')) return;
+      if (item.url.startsWith('blob:')) return; // local file — TV can't reach blob URLs
       castPlaylistMap.push(pi);
-      const mediaInfo = new chrome.cast.media.MediaInfo(item.url, 'application/x-mpegURL');
+      // Use correct MIME type so the receiver knows how to decode the stream
+      const contentType = isHlsContent(item.url) ? 'application/x-mpegURL' : 'video/mp4';
+      const mediaInfo = new chrome.cast.media.MediaInfo(item.url, contentType);
       mediaInfo.streamType = chrome.cast.media.StreamType.BUFFERED;
       mediaInfo.metadata = new chrome.cast.media.GenericMediaMetadata();
       mediaInfo.metadata.title = item.title;
@@ -1872,10 +1874,12 @@
     let castStart = castPlaylistMap.findIndex(pi => pi >= startIdx);
     if (castStart < 0) castStart = 0;
 
-    const queueData = new chrome.cast.media.QueueData(
-      'console-m3u8-queue', 'WePlay Playlist', '',
-      chrome.cast.media.RepeatMode.ALL, items, castStart, 0
-    );
+    // Use property assignment (not constructor args) to avoid SDK-version mismatch
+    const queueData = new chrome.cast.media.QueueData();
+    queueData.repeatMode = chrome.cast.media.RepeatMode.ALL;
+    queueData.items = items;
+    queueData.startIndex = castStart;
+
     const request = new chrome.cast.media.LoadRequest(items[castStart].media);
     request.queueData = queueData;
     castStatus.textContent = 'CAST: กำลังส่งคิวไปทีวี…';
