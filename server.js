@@ -21,6 +21,7 @@ const fs    = require('fs');
 const path  = require('path');
 const os    = require('os');
 const dns   = require('dns');
+const { spawn } = require('child_process');
 
 const PORT = parseInt(process.env.PORT || '8000', 10);
 // 0.0.0.0: ให้อุปกรณ์อื่นในบ้าน (เช่น Android TV ตอน Cast ผ่าน /proxy) เรียกเข้ามาได้
@@ -201,6 +202,66 @@ function getLanIPv4() {
   return chosen ? chosen.address : null;
 }
 
+/* ---------- Cloudflare Tunnel (HTTPS) สำหรับ Cast ---------- */
+// ตั้งแต่ ~2021 ตัวรับ Cast มาตรฐาน (Default Media Receiver) ของ Google ไม่เล่น
+// สื่อที่โหลดผ่าน http:// อีกต่อไป (หน้าตัวรับเองเป็น HTTPS จึงถูกนโยบาย mixed-content
+// บล็อกการไปดึง http:// ตั้งแต่ฝั่งทีวีเอง — ไม่มี request ออกมาถึงเราด้วยซ้ำ) จึงต้องมี
+// HTTPS ให้ /proxy ซึ่ง LAN IP ธรรมดาทำไม่ได้ (ไม่มีใบรับรองที่ทีวีเชื่อถือ) เลยเปิด
+// Cloudflare "quick tunnel" ครอบให้แทน — ได้โดเมน https://xxxx.trycloudflare.com ที่มี
+// ใบรับรองจริง ชี้กลับมาที่เครื่องนี้ ไม่ต้องมีบัญชี Cloudflare หรือโดเมนของตัวเอง
+let publicBaseUrl = null;
+let cloudflaredProc = null;
+
+function startCloudflareTunnel() {
+  if (process.env.NO_TUNNEL) return; // ปิดได้ด้วย NO_TUNNEL=1 ถ้าไม่ต้องการ
+  const candidates = [
+    process.env.CLOUDFLARED_PATH,
+    'cloudflared',
+    'C:\\Program Files (x86)\\cloudflared\\cloudflared.exe',
+    'C:\\Program Files\\cloudflared\\cloudflared.exe',
+  ].filter(Boolean);
+
+  tryNext(0);
+
+  function tryNext(i) {
+    if (i >= candidates.length) {
+      console.log('  ▶ ไม่พบ cloudflared — ปุ่ม CAST จะยังเล่นไม่ได้บนทีวีรุ่นที่บังคับ HTTPS');
+      console.log('    ติดตั้งด้วย: winget install --id Cloudflare.cloudflared -e');
+      return;
+    }
+    const bin = candidates[i];
+    let proc;
+    try {
+      proc = spawn(bin, ['tunnel', '--url', 'http://127.0.0.1:' + PORT, '--no-autoupdate'], { windowsHide: true });
+    } catch (e) { return tryNext(i + 1); }
+
+    let foundUrl = false;
+    const onOutput = (buf) => {
+      const text = buf.toString();
+      const m = text.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/i);
+      if (m && !publicBaseUrl) {
+        publicBaseUrl = m[0];
+        foundUrl = true;
+        console.log('  ▶ เปิด HTTPS tunnel สำหรับ Cast แล้ว: ' + publicBaseUrl);
+      }
+    };
+    proc.stdout.on('data', onOutput);
+    proc.stderr.on('data', onOutput); // cloudflared ปกติพิมพ์ URL ออกทาง stderr
+    proc.on('error', () => { if (!foundUrl) tryNext(i + 1); });
+    proc.on('exit', (code) => {
+      if (cloudflaredProc === proc) cloudflaredProc = null;
+      if (publicBaseUrl && publicBaseUrl.includes(bin)) publicBaseUrl = null;
+    });
+    cloudflaredProc = proc;
+  }
+}
+
+function stopCloudflareTunnel() {
+  if (cloudflaredProc) { try { cloudflaredProc.kill(); } catch (e) {} }
+}
+process.on('SIGINT', () => { stopCloudflareTunnel(); process.exit(0); });
+process.on('SIGTERM', () => { stopCloudflareTunnel(); process.exit(0); });
+
 const server = http.createServer((req, res) => {
   let urlPath;
   try { urlPath = decodeURIComponent(req.url.split('?')[0]); }
@@ -223,7 +284,7 @@ const server = http.createServer((req, res) => {
   // http:// ไม่ผ่าน ปุ่ม CAST จะกดไม่ได้ถ้าบังคับเปิดด้วย IP ตรงๆ)
   if (urlPath === '/api/lan-ip') {
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-    return res.end(JSON.stringify({ ip: getLanIPv4(), port: PORT, candidates: listLanCandidates() }));
+    return res.end(JSON.stringify({ ip: getLanIPv4(), port: PORT, candidates: listLanCandidates(), publicBase: publicBaseUrl }));
   }
 
   if (urlPath === '/proxy') {
@@ -273,4 +334,5 @@ server.listen(PORT, HOST, () => {
   }
   console.log('  ▶ กด Ctrl+C เพื่อหยุดเซิร์ฟเวอร์');
   console.log('');
+  startCloudflareTunnel();
 });

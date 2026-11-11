@@ -1023,29 +1023,36 @@
   // server.js (รันบนเครื่องนี้) ให้เครื่องนี้ดึงแทนทีวี — ใช้ได้เฉพาะตอนรัน server.js
   // เอง (ไม่ใช่ GitHub Pages ที่ไม่มี backend)
   //
-  // สำคัญ: ปุ่ม CAST ใช้ Google Cast SDK ซึ่งต้องการ "secure context" — localhost
-  // ผ่านเกณฑ์นี้ แต่เปิดหน้านี้ด้วย IP เปล่าบน http:// (เช่น http://192.168.x.x)
-  // ไม่ผ่าน ปุ่ม CAST จะกดไม่ได้เลย ดังนั้นให้เปิดหน้านี้ผ่าน localhost ตามปกติ แล้ว
-  // ให้ฝั่งนี้ไปถาม server.js เองว่า LAN IP ของเครื่องคืออะไร (ผ่าน /api/lan-ip)
-  // เพื่อเอาไปสร้างลิงก์ /proxy ที่ทีวีเข้าถึงได้ — ไม่ต้องเปลี่ยนวิธีเปิดหน้าเว็บ
-  let lanOrigin = null;
-  let lanOriginPromise = null;
-  function getLanOrigin(){
-    if (lanOriginPromise) return lanOriginPromise;
-    lanOriginPromise = fetch('/api/lan-ip').then(r => r.ok ? r.json() : null).then(info => {
-      if (info && info.ip) lanOrigin = 'http://' + info.ip + ':' + info.port;
-      return lanOrigin;
-    }).catch(()=> null);
-    return lanOriginPromise;
-  }
+  // สำคัญอีกข้อ: ตั้งแต่ปี 2021 ตัวรับ Cast มาตรฐาน (Default Media Receiver) ของ
+  // Google ไม่เล่นสื่อที่โหลดผ่าน http:// อีกต่อไป (ตัวรับเองเป็นหน้า HTTPS จึงถูก
+  // นโยบาย mixed-content บล็อกการไปดึง http:// ตั้งแต่ฝั่งทีวีเลย ไม่มี request ออกมา
+  // ถึงเราด้วยซ้ำ) server.js จึงเปิด Cloudflare quick tunnel ให้ /proxy มี URL แบบ
+  // https://xxxx.trycloudflare.com ซึ่งทีวีเชื่อถือใบรับรองได้จริง — ฝั่งนี้แค่ไปถาม
+  // /api/lan-ip ว่าตอนนี้มี tunnel แล้วหรือยัง (ใช้เวลาสองสามวินาทีหลัง server เริ่ม)
+  // ถ้ายังไม่มี ใช้ IP เครื่อง (http://) เป็นตัวสำรอง (จะเล่นไม่ได้บนทีวีรุ่นใหม่)
+  //
+  // ส่วน "secure context" ของปุ่ม CAST เอง (Google Cast SDK) ก็ต้องการเช่นกัน —
+  // localhost ผ่านเกณฑ์นี้ แต่เปิดหน้านี้ด้วย IP เปล่าบน http:// ไม่ผ่าน ปุ่ม CAST จะ
+  // กดไม่ได้เลย ดังนั้นให้เปิดหน้านี้ผ่าน localhost ตามปกติเสมอ
   function isGithubPagesHost(){
     return /\.github\.io$/i.test(location.hostname);
   }
-  function castContentUrl(rawUrl){
-    if (!isHlsContent(rawUrl) || isGithubPagesHost()) return rawUrl;
-    return (lanOrigin || location.origin) + '/proxy?url=' + encodeURIComponent(rawUrl);
+  let proxyOrigin = null; // อัปเดตสดทุกครั้งก่อน Cast เพราะ tunnel อาจเพิ่งขึ้นหลัง server start
+  async function refreshProxyOrigin(){
+    if (isGithubPagesHost()) return null;
+    try{
+      const r = await fetch('/api/lan-ip');
+      const info = r.ok ? await r.json() : null;
+      if (info && info.publicBase) proxyOrigin = info.publicBase.replace(/\/$/, '');
+      else if (info && info.ip) proxyOrigin = 'http://' + info.ip + ':' + info.port;
+      else proxyOrigin = null;
+    } catch(e){ proxyOrigin = null; }
+    return proxyOrigin;
   }
-  if (!isGithubPagesHost()) getLanOrigin(); // เริ่มถามล่วงหน้าตอนโหลดหน้า จะได้พร้อมตอนกด CAST
+  function castContentUrl(rawUrl){
+    if (!isHlsContent(rawUrl) || isGithubPagesHost() || !proxyOrigin) return rawUrl;
+    return proxyOrigin + '/proxy?url=' + encodeURIComponent(rawUrl);
+  }
 
   // Watchdog: if currentTime stops advancing while readyState is low (buffering),
   // call startLoad() to restart fragment fetching. Avoids calling recoverMediaError()
@@ -1881,8 +1888,12 @@
     if (isGithubPagesHost()){
       showToast('เว็บนี้รันบน GitHub Pages ไม่มี proxy ช่วย Cast — ลิงก์ .m3u8 ที่ล็อก IP token อาจเล่นบนทีวีไม่ได้ ให้รัน server.js ในเครื่องแทน', 'warn', 7000);
     } else {
-      await getLanOrigin();
-      if (!lanOrigin) showToast('หาที่อยู่ IP ของเครื่องนี้ในวง LAN ไม่เจอ — ทีวีอาจเข้าถึงสตรีมผ่าน proxy ไม่ได้', 'warn', 6000);
+      await refreshProxyOrigin();
+      if (!proxyOrigin){
+        showToast('หาที่อยู่ของเครื่องนี้ไม่เจอ — ทีวีอาจเข้าถึงสตรีมผ่าน proxy ไม่ได้', 'warn', 6000);
+      } else if (proxyOrigin.startsWith('http://')){
+        showToast('ยังไม่เจอ HTTPS tunnel (cloudflared) ใช้ IP เครื่องแทนไปก่อน — ทีวีรุ่นใหม่อาจเล่นไม่ได้ รอสักครู่แล้ว Cast ใหม่อีกที', 'warn', 7000);
+      }
     }
 
     castPlaylistMap = [];
