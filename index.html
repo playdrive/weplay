@@ -1022,16 +1022,30 @@
   // token อนุญาต ทำให้ค้างที่หน้า Cast เปล่า จึงต้องวน URL กลับผ่าน /proxy ของ
   // server.js (รันบนเครื่องนี้) ให้เครื่องนี้ดึงแทนทีวี — ใช้ได้เฉพาะตอนรัน server.js
   // เอง (ไม่ใช่ GitHub Pages ที่ไม่มี backend)
+  //
+  // สำคัญ: ปุ่ม CAST ใช้ Google Cast SDK ซึ่งต้องการ "secure context" — localhost
+  // ผ่านเกณฑ์นี้ แต่เปิดหน้านี้ด้วย IP เปล่าบน http:// (เช่น http://192.168.x.x)
+  // ไม่ผ่าน ปุ่ม CAST จะกดไม่ได้เลย ดังนั้นให้เปิดหน้านี้ผ่าน localhost ตามปกติ แล้ว
+  // ให้ฝั่งนี้ไปถาม server.js เองว่า LAN IP ของเครื่องคืออะไร (ผ่าน /api/lan-ip)
+  // เพื่อเอาไปสร้างลิงก์ /proxy ที่ทีวีเข้าถึงได้ — ไม่ต้องเปลี่ยนวิธีเปิดหน้าเว็บ
+  let lanOrigin = null;
+  let lanOriginPromise = null;
+  function getLanOrigin(){
+    if (lanOriginPromise) return lanOriginPromise;
+    lanOriginPromise = fetch('/api/lan-ip').then(r => r.ok ? r.json() : null).then(info => {
+      if (info && info.ip) lanOrigin = 'http://' + info.ip + ':' + info.port;
+      return lanOrigin;
+    }).catch(()=> null);
+    return lanOriginPromise;
+  }
   function isGithubPagesHost(){
     return /\.github\.io$/i.test(location.hostname);
   }
-  function isLoopbackHost(){
-    return location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '[::1]';
-  }
   function castContentUrl(rawUrl){
     if (!isHlsContent(rawUrl) || isGithubPagesHost()) return rawUrl;
-    return location.origin + '/proxy?url=' + encodeURIComponent(rawUrl);
+    return (lanOrigin || location.origin) + '/proxy?url=' + encodeURIComponent(rawUrl);
   }
+  if (!isGithubPagesHost()) getLanOrigin(); // เริ่มถามล่วงหน้าตอนโหลดหน้า จะได้พร้อมตอนกด CAST
 
   // Watchdog: if currentTime stops advancing while readyState is low (buffering),
   // call startLoad() to restart fragment fetching. Avoids calling recoverMediaError()
@@ -1861,13 +1875,14 @@
 
   // Builds cast queue skipping local files (blob: URLs are device-only — TV can't reach them).
   // castPlaylistMap[castQueueIdx] = full playlist index, so itemIdToIndex maps correctly.
-  function castLoadQueue(startIdx){
+  async function castLoadQueue(startIdx){
     if (!castSession || playlist.length === 0) return;
 
     if (isGithubPagesHost()){
       showToast('เว็บนี้รันบน GitHub Pages ไม่มี proxy ช่วย Cast — ลิงก์ .m3u8 ที่ล็อก IP token อาจเล่นบนทีวีไม่ได้ ให้รัน server.js ในเครื่องแทน', 'warn', 7000);
-    } else if (isLoopbackHost()){
-      showToast('กำลังเปิดผ่าน localhost — ทีวีเข้าถึงที่อยู่นี้ไม่ได้ ให้เปิดหน้านี้ด้วย IP เครื่องนี้แทน (ดูที่ terminal ตอนรัน server.js)', 'warn', 7000);
+    } else {
+      await getLanOrigin();
+      if (!lanOrigin) showToast('หาที่อยู่ IP ของเครื่องนี้ในวง LAN ไม่เจอ — ทีวีอาจเข้าถึงสตรีมผ่าน proxy ไม่ได้', 'warn', 6000);
     }
 
     castPlaylistMap = [];

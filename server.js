@@ -196,6 +196,15 @@ const server = http.createServer((req, res) => {
     return res.end(JSON.stringify({ status: 'ok', app: 'm3u8', ts: Date.now() }));
   }
 
+  // ให้หน้าเว็บรู้ IP ของ LAN เพื่อสร้างลิงก์ /proxy ที่ทีวีเข้าถึงได้ โดยไม่ต้อง
+  // บังคับให้ผู้ใช้เปิดหน้าเว็บผ่าน IP นั้นเอง — เปิดผ่าน localhost ได้ตามปกติ
+  // (Google Cast SDK ต้องการ secure context ซึ่ง localhost ผ่าน แต่ IP เปล่าบน
+  // http:// ไม่ผ่าน ปุ่ม CAST จะกดไม่ได้ถ้าบังคับเปิดด้วย IP ตรงๆ)
+  if (urlPath === '/api/lan-ip') {
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    return res.end(JSON.stringify({ ip: getLanIPv4(), port: PORT }));
+  }
+
   if (urlPath === '/proxy') {
     const qIndex = req.url.indexOf('?');
     const qs = qIndex >= 0 ? new URLSearchParams(req.url.slice(qIndex + 1)) : new URLSearchParams();
@@ -230,10 +239,11 @@ const server = http.createServer((req, res) => {
 server.listen(PORT, HOST, () => {
   console.log('');
   console.log('  ▶ WePlay กำลังทำงานที่: http://localhost:' + PORT);
+  console.log('  ▶ เปิดลิงก์นี้ใน Chrome เพื่อใช้งาน (ปุ่ม CAST ต้องเปิดผ่าน localhost ถึงจะกดได้)');
   const lan = getLanIPv4();
   if (lan) {
-    console.log('  ▶ สำหรับ Cast ไปทีวี (จำเป็น) ให้เปิดลิงก์นี้แทน localhost: http://' + lan + ':' + PORT);
+    console.log('  ▶ เครื่องนี้อยู่ที่ IP: ' + lan + ' (ใช้ภายใน /proxy ตอน Cast โดยอัตโนมัติ ไม่ต้องเปิดลิงก์นี้เอง)');
   }
-  console.log('  ▶ เปิดลิงก์ใน Chrome เพื่อใช้งาน (กด Ctrl+C เพื่อหยุด)');
+  console.log('  ▶ กด Ctrl+C เพื่อหยุดเซิร์ฟเวอร์');
   console.log('');
 });
