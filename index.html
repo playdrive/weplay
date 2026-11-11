@@ -1853,9 +1853,15 @@
       if (item.url.startsWith('blob:')) return; // local file — TV can't reach blob URLs
       castPlaylistMap.push(pi);
       // Use correct MIME type so the receiver knows how to decode the stream
-      const contentType = isHlsContent(item.url) ? 'application/x-mpegURL' : 'video/mp4';
+      const isLiveStream = isHlsContent(item.url);
+      const contentType = isLiveStream ? 'application/x-mpegURL' : 'video/mp4';
       const mediaInfo = new chrome.cast.media.MediaInfo(item.url, contentType);
-      mediaInfo.streamType = chrome.cast.media.StreamType.BUFFERED;
+      // ช่องทีวี .m3u8 ส่วนใหญ่เป็นสตรีมไลฟ์ (ไม่มี duration แน่นอน) — ถ้าบอก receiver
+      // ว่าเป็น BUFFERED (เหมือนไฟล์ VOD) ตัวรับจะพยายามคำนวณ seek/duration กับสตรีม
+      // ที่ไม่มีจุดจบ ทำให้ค้าง/บัฟเฟอร์ไม่จบบน Android TV
+      mediaInfo.streamType = isLiveStream
+        ? chrome.cast.media.StreamType.LIVE
+        : chrome.cast.media.StreamType.BUFFERED;
       mediaInfo.metadata = new chrome.cast.media.GenericMediaMetadata();
       mediaInfo.metadata.title = item.title;
       const qi = new chrome.cast.media.QueueItem(mediaInfo);
