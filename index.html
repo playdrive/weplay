@@ -1016,6 +1016,23 @@
     return p.endsWith('.m3u8') || p.endsWith('.m3u');
   }
 
+  // ----- Chromecast relay helpers -----
+  // หลายลิงก์ .m3u8 ของ IPTV ผูก token กับ IP ของเครื่องที่ขอก่อน (เช่นเครื่องนี้)
+  // ถ้าให้ Android TV ไปดึง URL เดิมตรงๆ มันจะใช้ IP ของตัวเอง ซึ่งมักไม่ตรงกับที่
+  // token อนุญาต ทำให้ค้างที่หน้า Cast เปล่า จึงต้องวน URL กลับผ่าน /proxy ของ
+  // server.js (รันบนเครื่องนี้) ให้เครื่องนี้ดึงแทนทีวี — ใช้ได้เฉพาะตอนรัน server.js
+  // เอง (ไม่ใช่ GitHub Pages ที่ไม่มี backend)
+  function isGithubPagesHost(){
+    return /\.github\.io$/i.test(location.hostname);
+  }
+  function isLoopbackHost(){
+    return location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '[::1]';
+  }
+  function castContentUrl(rawUrl){
+    if (!isHlsContent(rawUrl) || isGithubPagesHost()) return rawUrl;
+    return location.origin + '/proxy?url=' + encodeURIComponent(rawUrl);
+  }
+
   // Watchdog: if currentTime stops advancing while readyState is low (buffering),
   // call startLoad() to restart fragment fetching. Avoids calling recoverMediaError()
   // for buffer stalls — that resets MediaSource and causes a visible jump.
@@ -1847,6 +1864,12 @@
   function castLoadQueue(startIdx){
     if (!castSession || playlist.length === 0) return;
 
+    if (isGithubPagesHost()){
+      showToast('เว็บนี้รันบน GitHub Pages ไม่มี proxy ช่วย Cast — ลิงก์ .m3u8 ที่ล็อก IP token อาจเล่นบนทีวีไม่ได้ ให้รัน server.js ในเครื่องแทน', 'warn', 7000);
+    } else if (isLoopbackHost()){
+      showToast('กำลังเปิดผ่าน localhost — ทีวีเข้าถึงที่อยู่นี้ไม่ได้ ให้เปิดหน้านี้ด้วย IP เครื่องนี้แทน (ดูที่ terminal ตอนรัน server.js)', 'warn', 7000);
+    }
+
     castPlaylistMap = [];
     const items = [];
     playlist.forEach((item, pi)=>{
@@ -1855,7 +1878,9 @@
       // Use correct MIME type so the receiver knows how to decode the stream
       const isLiveStream = isHlsContent(item.url);
       const contentType = isLiveStream ? 'application/x-mpegURL' : 'video/mp4';
-      const mediaInfo = new chrome.cast.media.MediaInfo(item.url, contentType);
+      // สตรีม HLS วนผ่าน /proxy ของเครื่องนี้ (ดู castContentUrl) ไฟล์ mp4/webm ปลายทาง
+      // ทั่วไปไม่ต้องผ่าน proxy เพราะส่วนใหญ่ไม่ได้ล็อก IP แบบ m3u8 ของ IPTV
+      const mediaInfo = new chrome.cast.media.MediaInfo(castContentUrl(item.url), contentType);
       // ช่องทีวี .m3u8 ส่วนใหญ่เป็นสตรีมไลฟ์ (ไม่มี duration แน่นอน) — ถ้าบอก receiver
       // ว่าเป็น BUFFERED (เหมือนไฟล์ VOD) ตัวรับจะพยายามคำนวณ seek/duration กับสตรีม
       // ที่ไม่มีจุดจบ ทำให้ค้าง/บัฟเฟอร์ไม่จบบน Android TV
