@@ -175,20 +175,41 @@ async function handleProxy(req, res, targetParam) {
   });
 }
 
-function getLanIPv4() {
+// เครื่องที่มี WSL/Hyper-V/VPN/VMware มักมีการ์ดเน็ตเวิร์กเสมือนที่ os.networkInterfaces()
+// คืนมาด้วย ซึ่งทีวีในบ้านเข้าไม่ถึง (คนละ subnet) ต้องกรองออกก่อนเดา LAN IP จริง
+const VIRTUAL_IFACE_NAME = /virtual|vmware|virtualbox|hyper-v|vethernet|v-switch|docker|wsl|loopback|teredo|tap-|tailscale|zerotier|npcap/i;
+
+function listLanCandidates() {
   const ifaces = os.networkInterfaces();
+  const out = [];
   for (const name of Object.keys(ifaces)) {
     for (const iface of ifaces[name] || []) {
-      if (iface.family === 'IPv4' && !iface.internal) return iface.address;
+      if (iface.family === 'IPv4' && !iface.internal) {
+        out.push({ name, address: iface.address, likely: !VIRTUAL_IFACE_NAME.test(name) });
+      }
     }
   }
-  return null;
+  return out;
+}
+
+function getLanIPv4() {
+  if (process.env.LAN_IP) return process.env.LAN_IP; // ตั้งเองได้ถ้าเดาผิด
+  const all = listLanCandidates();
+  const real = all.filter((c) => c.likely);
+  const pick = (list) => list.find((c) => c.address.startsWith('192.168.')) || list[0];
+  const chosen = real.length ? pick(real) : pick(all);
+  return chosen ? chosen.address : null;
 }
 
 const server = http.createServer((req, res) => {
   let urlPath;
   try { urlPath = decodeURIComponent(req.url.split('?')[0]); }
   catch (_) { res.writeHead(400); return res.end('Bad request'); }
+
+  // log ชั่วคราวไว้ไล่ดูว่าทีวีเรียก /proxy เข้ามาจริงไหมตอน Cast (ลบออกได้ทีหลัง)
+  if (urlPath === '/proxy') {
+    console.log('[proxy]', req.socket.remoteAddress, req.url.slice(0, 160));
+  }
 
   // health check (parity กับแอปอื่นบน server)
   if (urlPath === '/api/health') {
@@ -202,7 +223,7 @@ const server = http.createServer((req, res) => {
   // http:// ไม่ผ่าน ปุ่ม CAST จะกดไม่ได้ถ้าบังคับเปิดด้วย IP ตรงๆ)
   if (urlPath === '/api/lan-ip') {
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-    return res.end(JSON.stringify({ ip: getLanIPv4(), port: PORT }));
+    return res.end(JSON.stringify({ ip: getLanIPv4(), port: PORT, candidates: listLanCandidates() }));
   }
 
   if (urlPath === '/proxy') {
@@ -240,9 +261,15 @@ server.listen(PORT, HOST, () => {
   console.log('');
   console.log('  ▶ WePlay กำลังทำงานที่: http://localhost:' + PORT);
   console.log('  ▶ เปิดลิงก์นี้ใน Chrome เพื่อใช้งาน (ปุ่ม CAST ต้องเปิดผ่าน localhost ถึงจะกดได้)');
+  const all = listLanCandidates();
   const lan = getLanIPv4();
   if (lan) {
     console.log('  ▶ เครื่องนี้อยู่ที่ IP: ' + lan + ' (ใช้ภายใน /proxy ตอน Cast โดยอัตโนมัติ ไม่ต้องเปิดลิงก์นี้เอง)');
+  }
+  if (all.length > 1) {
+    console.log('  ▶ เจอ IP อื่นในเครื่องด้วย: ' + all.map((c) => c.address + ' (' + c.name + ')').join(', '));
+    console.log('    ถ้า Cast แล้วทีวีไม่โหลด ลองระบุ IP วง Wi-Fi/LAN บ้านเองแทน เช่น (PowerShell):');
+    console.log('    $env:LAN_IP="192.168.1.23"; node server.js');
   }
   console.log('  ▶ กด Ctrl+C เพื่อหยุดเซิร์ฟเวอร์');
   console.log('');
